@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wellness Cafe POS - Staff Sign In</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-brand">
+      <img src="img/logo.png" alt="Wellness Cafe"
+           style="width:120px;height:120px;border-radius:50%;display:block;margin:0 auto 14px;object-fit:cover;box-shadow:0 8px 18px rgba(0,0,0,.18)"
+           onerror="this.outerHTML='<div class=&quot;logo&quot;>☕</div>'">
+      <h1>Wellness Cafe POS</h1>
+      <p style="font-style:italic;color:#475569">Relax . Reflect . Recharge</p>
+      <p style="font-size:11.5px;color:#94a3b8;margin-top:2px">Ground Floor, Block 7, FPM, UPSI</p>
+      <p style="font-size:11.5px;color:#10b981;margin-top:6px;font-weight:600">Staff Portal</p>
+    </div>
+
+    <div id="alert-box"></div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" autocomplete="username" required placeholder="Enter your username">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" required placeholder="Enter your password">
+      </div>
+      <button type="submit" class="btn-primary" id="signInBtn">Sign In</button>
+    </form>
+
+    <div class="login-hint">
+      <b>Demo Accounts</b>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11.5px;line-height:1.7">
+        <span>Admin</span>          <span><code>admin / admin123</code></span>
+        <span>Manager</span>        <span><code>manager / manager123</code></span>
+        <span>Cashier</span>        <span><code>cashier / cashier123</code></span>
+        <span>Kitchen Staff</span>  <span><code>kitchen / kitchen123</code></span>
+        <span>Inventory</span>      <span><code>stock / stock123</code></span>
+      </div>
+      <div style="margin-top:10px;text-align:center">
+        <a href="/" style="color:#065f46;font-weight:600">← Back to customer ordering</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script>
+// If user already has a valid session, skip the login screen
+if (API.isAuthenticated()) {
+  API.me()
+    .then(() => location.href = 'app.html')
+    .catch(() => API.clearSession());
+}
+
+const alertBox = document.getElementById('alert-box');
+const form     = document.getElementById('loginForm');
+const btn      = document.getElementById('signInBtn');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  alertBox.innerHTML = '';
+  btn.disabled = true;
+  btn.textContent = 'Signing in...';
+
+  const u = document.getElementById('username').value.trim();
+  const p = document.getElementById('password').value;
+
+  try {
+    const result = await API.login(u, p);
+    API.setSession(result.token, result.user);
+    location.href = 'app.html';
+  } catch (err) {
+    const msg = err.payload?.errors?.username?.[0]
+             || err.payload?.message
+             || err.message
+             || 'Sign-in failed.';
+    alertBox.innerHTML = `<div class="alert alert-danger">${msg}</div>`;
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+});
+</script>
+</body>
+</html>

@@ -72,4 +72,23 @@ class OrderController extends Controller
 
         return response()->json($order, 201);
     }
+
+    /**
+     * POST /api/orders/{order}/payment
+     * Confirms payment at the counter for a pending_payment order
+     * (typically QR orders that didn't pay during ordering).
+     * Body: { method: cash|card|ewallet|qr }
+     */
+    public function takePayment(Request $request, Order $order): JsonResponse
+    {
+        $data = $request->validate([
+            'method' => ['required', 'in:cash,card,ewallet,qr'],
+        ]);
+
+        $this->orders->takePayment($order, $data['method'], $request->user());
+
+        return response()->json(
+            $order->fresh()->load(['items', 'payment', 'customer', 'table', 'cashier'])
+        );
+    }
 }

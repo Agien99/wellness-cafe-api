@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wellness Cafe POS - Dashboard</title>
+<link rel="stylesheet" href="css/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ===== Sidebar ===== -->
+  <aside class="sidebar">
+    <div class="brand-row">
+      <img src="img/logo.png" alt="Wellness Cafe"
+           style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#fff"
+           onerror="this.outerHTML='<div class=&quot;icon&quot;>☕</div>'">
+      <div class="text">Wellness Cafe<small>Relax · Reflect · Recharge</small></div>
+    </div>
+
+    <ul class="nav-list" id="navList">
+      <!-- nav items populated by JS based on role -->
+    </ul>
+
+    <div class="sidebar-footer">
+      <div class="user-card" id="userCard"></div>
+      <button class="btn-logout" id="logoutBtn">⎋ Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <main class="main">
+    <header class="topbar">
+      <div class="page-title">
+        <h2 id="pageTitle">Dashboard</h2>
+        <small id="pageSubtitle">Operational overview & live metrics</small>
+      </div>
+      <div class="clock" id="clock"></div>
+    </header>
+
+    <section class="content" id="content">
+      <!-- view rendered here -->
+    </section>
+  </main>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+<div id="modalRoot"></div>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
