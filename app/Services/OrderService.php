@@ -207,6 +207,63 @@ class OrderService
     }
 
     /**
+     * Take payment for an order that's in pending_payment status
+     * (typically a QR order paid at the counter after the customer arrives).
+     *
+     * Creates the Payment record, flips order.status to 'completed', awards
+     * loyalty points / tier upgrade, and writes audit entries.
+     */
+    public function takePayment(Order $order, string $method, ?User $cashier = null): Order
+    {
+        if ($order->status !== 'pending_payment') {
+            throw ValidationException::withMessages([
+                'order' => ["Order {$order->order_no} is not pending payment (current status: {$order->status})."],
+            ]);
+        }
+
+        return DB::transaction(function () use ($order, $method, $cashier) {
+            // Create the Payment record
+            Payment::create([
+                'order_id'  => $order->id,
+                'amount'    => $order->total,
+                'method'    => $method,
+                'status'    => 'paid',
+                'reference' => 'PAY' . str_pad((string)(20260000 + $order->id), 8, '0', STR_PAD_LEFT),
+                'paid_at'   => now(),
+            ]);
+
+            // Flip order to completed; record which cashier handled it
+            $order->status     = 'completed';
+            $order->cashier_id = $cashier?->id;
+            $order->save();
+
+            // Loyalty points + tier upgrade (skip walk-in id=8 and null)
+            if ($order->customer_id && $order->customer_id !== 8) {
+                $customer = Customer::find($order->customer_id);
+                if ($customer) {
+                    $earned = (int) floor((float) $order->total * $customer->point_multiplier);
+                    $customer->points      = (int) $customer->points + $earned;
+                    $customer->total_spent = round((float) $customer->total_spent + (float) $order->total, 2);
+
+                    $newTier = $this->resolveTier((float) $customer->total_spent);
+                    if ($newTier !== $customer->membership) {
+                        $oldTier = $customer->membership;
+                        $customer->membership = $newTier;
+                        AuditLog::record($cashier, 'LOYALTY_UPGRADE', "{$customer->name}: {$oldTier} → {$newTier}");
+                    }
+                    $customer->save();
+                }
+            }
+
+            AuditLog::record($cashier, 'PAYMENT_RECEIVED',
+                strtoupper($method) . ' RM' . number_format((float) $order->total, 2) . " for {$order->order_no} (was pending)"
+            );
+
+            return $order;
+        });
+    }
+
+    /**
      * Restore inventory + reverse loyalty points (used by refund flow).
      */
     public function reverse(Order $order, ?User $byUser = null): void

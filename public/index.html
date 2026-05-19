@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wellness Cafe — Order</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="qr-app">
+  <header class="qr-header">
+    <div style="display:flex;align-items:center;gap:12px">
+      <img src="img/logo.png" alt="Wellness Cafe"
+           style="width:54px;height:54px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#fff"
+           onerror="this.outerHTML='<span style=&quot;font-size:36px&quot;>☕</span>'">
+      <div style="flex:1">
+        <h1 style="margin:0">Wellness Cafe</h1>
+        <small><i>Relax · Reflect · Recharge</i> · Ground Floor, Block 7, FPM, UPSI</small>
+      </div>
+    </div>
+    <div class="qr-table-info" id="tableInfo">📍 Choose your table below to start ordering</div>
+  </header>
+
+  <div class="qr-body">
+    <div id="tablePicker" class="card" style="margin:14px 0">
+      <div class="card-header"><h3>Select your table</h3></div>
+      <div id="tableButtons" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+        <div class="text-muted text-center" style="grid-column:span 4">Loading tables…</div>
+      </div>
+      <p class="text-muted text-center mt-3" style="font-size:11.5px">No table? <a href="#" id="takeaway" style="color:#10b981;font-weight:600">Order for takeaway</a></p>
+    </div>
+
+    <div id="menuArea" class="hidden">
+      <div class="qr-cat-tabs" id="qrCatTabs"></div>
+      <div class="qr-product-list" id="qrProducts"></div>
+    </div>
+  </div>
+
+  <div class="qr-cart-bar hidden" id="qrCartBar">
+    <div class="row">
+      <div class="cnt" id="qrCartCount">0</div>
+      <div class="info">
+        <b id="qrCartTotal">RM 0.00</b>
+        <small id="qrCartItems">0 items</small>
+      </div>
+      <button class="btn primary lg" id="qrViewCart">View Cart →</button>
+    </div>
+  </div>
+
+  <!-- Discreet staff link for cafe staff to find their portal -->
+  <!-- <div style="text-align:center;padding:24px 12px;font-size:11px;color:#94a3b8">
+    <a href="staff.html" style="color:#94a3b8;text-decoration:none">Staff Portal</a>
+  </div>
+</div> -->
+
+<div id="modalRoot"></div>
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const BASE_API = '/api/public';
+let cafe = { name:'Wellness Cafe', currency:'RM', tax_rate:0.06 };
+let categories = [];
+let products = [];
+let tables = [];
+let currentCat = null;
+let cart = [];
+let tableId = null;
+let mode = null; // 'dinein' | 'takeaway'
+
+const $  = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const money = (n) => cafe.currency + ' ' + (+n).toFixed(2);
+
+function toast(msg, type='success') {
+  const c = $('#toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type==='error'?'error':'');
+  t.innerHTML = `<b>${type==='error'?'Error':'OK'}</b>${msg}`;
+  c.appendChild(t);
+  setTimeout(()=>{ t.style.opacity='0'; t.style.transition='.2s'; }, 2200);
+  setTimeout(()=>t.remove(), 2500);
+}
+
+async function fetchJson(method, path, body) {
+  const opts = { method, headers: { 'Accept':'application/json', 'Content-Type':'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(BASE_API + path, opts);
+  const text = await res.text();
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch(e){}
+  if (!res.ok) { const err = new Error(data?.message || 'Network error'); err.payload = data; throw err; }
+  return data;
+}
+
+async function loadData() {
+  try {
+    const menu = await fetchJson('GET', '/menu');
+    cafe = menu.cafe || cafe;
+    categories = menu.categories;
+    products = menu.products;
+    currentCat = categories[0]?.id;
+    tables = await fetchJson('GET', '/tables');
+    renderTables();
+  } catch (err) {
+    toast('Could not load menu: ' + err.message, 'error');
+  }
+}
+
+function renderTables() {
+  $('#tableButtons').innerHTML = tables.map(t =>
+    `<button class="btn" data-tableid="${t.id}">${t.name} (${t.capacity})</button>`
+  ).join('');
+  $$('#tableButtons button[data-tableid]').forEach(b =>
+    b.addEventListener('click', () => { tableId = +b.dataset.tableid; mode='dinein'; startMenu(); })
+  );
+}
+
+$('#takeaway').addEventListener('click', e => {
+  e.preventDefault();
+  tableId = null; mode = 'takeaway';
+  startMenu();
+});
+
+function startMenu() {
+  $('#tablePicker').classList.add('hidden');
+  $('#menuArea').classList.remove('hidden');
+  $('#tableInfo').textContent = mode==='dinein'
+    ? `📍 Ordering for Table ${tables.find(t=>t.id===tableId).name}`
+    : '📦 Takeaway order';
+  renderCats(); renderProducts();
+}
+
+function renderCats() {
+  $('#qrCatTabs').innerHTML = categories.filter(c => c.id !== 6).map(c =>
+    `<button class="qr-cat ${c.id===currentCat?'active':''}" data-id="${c.id}">${c.icon} ${c.name}</button>`
+  ).join('');
+  $$('#qrCatTabs .qr-cat').forEach(b => b.addEventListener('click', () => {
+    currentCat = +b.dataset.id; renderCats(); renderProducts();
+  }));
+}
+
+function renderProducts() {
+  const prods = products.filter(p => p.category_id === currentCat && p.available);
+  $('#qrProducts').innerHTML = prods.map(p => {
+    const visual = p.image_url
+      ? `<img src="${p.image_url}" style="width:70px;height:70px;border-radius:8px;object-fit:cover">`
+      : (p.image || '🍽');
+    return `<div class="qr-product">
+      <div class="img">${visual}</div>
+      <div class="name">${p.name}</div>
+      <div class="price">${money(p.price)}</div>
+      <button class="add" data-id="${p.id}">+ Add</button>
+    </div>`;
+  }).join('');
+  $$('#qrProducts .add').forEach(b => b.addEventListener('click', () => {
+    const p = products.find(x => x.id === +b.dataset.id);
+    const ex = cart.find(x => x.productId === p.id);
+    if (ex) ex.qty += 1;
+    else cart.push({ productId: p.id, name: p.name, price: +p.price, qty: 1 });
+    toast(`Added: ${p.name}`);
+    refreshCartBar();
+  }));
+}
+
+function refreshCartBar() {
+  const cnt = cart.reduce((s,x) => s + x.qty, 0);
+  const total = cart.reduce((s,x) => s + x.price * x.qty, 0);
+  if (cnt === 0) { $('#qrCartBar').classList.add('hidden'); return; }
+  $('#qrCartBar').classList.remove('hidden');
+  $('#qrCartCount').textContent = cnt;
+  $('#qrCartTotal').textContent = money(total);
+  $('#qrCartItems').textContent = `${cnt} ${cnt===1?'item':'items'}`;
+}
+
+$('#qrViewCart').addEventListener('click', openCart);
+
+function openCart() {
+  const sub = cart.reduce((s,x)=>s+x.price*x.qty, 0);
+  const tax = sub * cafe.tax_rate;
+  const total = sub + tax;
+  const html = `
+    <div class="modal-head"><h3>🛒 Your Order</h3><button class="close-btn" onclick="document.getElementById('modalRoot').innerHTML=''">×</button></div>
+    <div class="modal-body">
+      ${cart.length===0 ? '<div class="empty"><span class="em">🛒</span>Cart is empty</div>' : ''}
+      ${cart.map((it,i)=>`<div class="cart-item">
+        <div class="info"><b>${it.name}</b><small>${money(it.price)} × ${it.qty}</small></div>
+        <div class="qty-ctrl">
+          <button data-act="dec" data-i="${i}">−</button>
+          <span>${it.qty}</span>
+          <button data-act="inc" data-i="${i}">+</button>
+        </div>
+      </div>`).join('')}
+      ${cart.length>0?`
+      <div class="cart-summary">
+        <div class="sum-line"><span>Subtotal</span><span>${money(sub)}</span></div>
+        <div class="sum-line"><span>Tax (${(cafe.tax_rate*100).toFixed(0)}%)</span><span>${money(tax)}</span></div>
+        <div class="sum-line total"><span>Total</span><span>${money(total)}</span></div>
+      </div>
+      <div class="field mt-3"><label>Name (optional)</label><input id="qrName" placeholder="Your name"></div>
+      <div class="field"><label>Notes for kitchen (optional)</label><input id="qrNotes" placeholder="e.g. Less sugar"></div>
+      `:''}
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="document.getElementById('modalRoot').innerHTML=''">Keep Shopping</button>
+      ${cart.length>0?`<button class="btn primary lg" id="qrCheckout">Place Order →</button>`:''}
+    </div>`;
+  $('#modalRoot').innerHTML = `<div class="modal-backdrop" onclick="if(event.target===this)this.remove()"><div class="modal">${html}</div></div>`;
+  $$('#modalRoot .qty-ctrl button').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.i, act = b.dataset.act;
+    if (act==='inc') cart[i].qty += 1;
+    else if (act==='dec') {
+      if (cart[i].qty>1) cart[i].qty -= 1;
+      else cart.splice(i,1);
+    }
+    refreshCartBar();
+    openCart();
+  }));
+  const checkout = $('#qrCheckout');
+  if (checkout) checkout.addEventListener('click', placeOrder);
+}
+
+async function placeOrder() {
+  const customerName = ($('#qrName')?.value || '').trim() || 'QR Customer';
+  const notes = ($('#qrNotes')?.value || '').trim();
+  try {
+    const order = await fetchJson('POST', '/orders', {
+      items: cart.map(c => ({ product_id: c.productId, qty: c.qty })),
+      table_id: tableId,
+      customer_name: customerName,
+      notes,
+    });
+    $('#modalRoot').innerHTML = `<div class="modal-backdrop"><div class="modal">
+      <div class="modal-head"><h3>✅ Order Placed</h3></div>
+      <div class="modal-body" style="text-align:center">
+        <div style="font-size:64px;margin-bottom:10px">🎉</div>
+        <h3 style="color:#10b981;font-size:22px">Thank you, ${customerName}!</h3>
+        <p style="margin-top:10px;font-size:14px;color:#475569">Your order number is</p>
+        <div style="font-size:28px;font-weight:800;color:#064e3b;margin:10px 0">${order.order_no}</div>
+        <p style="font-size:13px;color:#475569">${tableId?`Order will be served to <b>Table ${tables.find(t=>t.id===tableId).name}</b>`:'Please pick up at the counter when ready.'}</p>
+        <div class="alert alert-warn mt-3" style="font-size:12px">Please proceed to the counter to complete payment.</div>
+        <div class="alert alert-info" style="font-size:12px"><b>Total Due:</b> ${money(order.total)}</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn primary block lg" onclick="location.reload()">Start New Order</button>
+      </div>
+    </div></div>`;
+    cart = [];
+  } catch (err) {
+    toast(err.payload?.message || 'Order failed: ' + err.message, 'error');
+  }
+}
+
+loadData();
+</script>
+
+</body>
+</html>
