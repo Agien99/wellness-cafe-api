@@ -14,11 +14,14 @@ class KitchenController extends Controller
     /**
      * GET /api/kitchen/orders
      * Returns active orders (pending, preparing, ready) for the KDS.
+     * Excludes orders still awaiting payment — kitchen only sees orders
+     * after the cashier confirms payment at the counter.
      */
     public function index(): JsonResponse
     {
         $orders = Order::with(['items', 'table', 'customer'])
             ->whereIn('kitchen_status', ['pending', 'preparing', 'ready'])
+            ->where('status', '!=', 'pending_payment')
             ->orderBy('created_at')
             ->get();
 

@@ -36,6 +36,8 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::get ('/public/menu',   [\App\Http\Controllers\Api\PublicController::class, 'menu']);
 Route::get ('/public/tables', [\App\Http\Controllers\Api\PublicController::class, 'tables']);
 Route::post('/public/orders', [\App\Http\Controllers\Api\PublicController::class, 'createOrder']);
+Route::get ('/public/orders/{orderNo}/status',      [\App\Http\Controllers\Api\PublicController::class, 'orderStatus']);
+Route::get ('/public/orders/{orderNo}/duitnow-qr',  [\App\Http\Controllers\Api\PublicController::class, 'orderDuitnowQr']);
 
 // Authenticated ---------------------------------------------------------------
 Route::middleware('auth:sanctum')->group(function () {
@@ -63,8 +65,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post  ('/products/{product}/image', [ProductController::class, 'uploadImage']);
     Route::delete('/products/{product}/image', [ProductController::class, 'removeImage']);
 
-    // -- Tables --
-    Route::get('/tables', [TableController::class, 'index']);
+    // -- Tables (full CRUD) --
+    Route::get   ('/tables',          [TableController::class, 'index']);
+    Route::post  ('/tables',          [TableController::class, 'store']);
+    Route::get   ('/tables/{table}',  [TableController::class, 'show']);
+    Route::put   ('/tables/{table}',  [TableController::class, 'update']);
+    Route::delete('/tables/{table}',  [TableController::class, 'destroy']);
 
     // -- Customers --
     Route::get   ('/customers',            [CustomerController::class, 'index']);
@@ -82,10 +88,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/promotions/{promotion}',    [PromotionController::class, 'destroy']);
 
     // -- Orders --
-    Route::get ('/orders',                 [OrderController::class, 'index']);
-    Route::post('/orders',                 [OrderController::class, 'store']);
-    Route::get ('/orders/{order}',         [OrderController::class, 'show']);
-    Route::post('/orders/{order}/payment', [OrderController::class, 'takePayment']);
+    Route::get ('/orders',                     [OrderController::class, 'index']);
+    Route::post('/orders',                     [OrderController::class, 'store']);
+    Route::get ('/orders/{order}',             [OrderController::class, 'show']);
+    Route::post('/orders/{order}/payment',     [OrderController::class, 'takePayment']);
+    Route::get ('/orders/{order}/duitnow-qr',  [OrderController::class, 'duitnowQr']);
 
     // -- Kitchen Display System --
     Route::get  ('/kitchen/orders',                [KitchenController::class, 'index']);
@@ -93,6 +100,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // -- Inventory --
     Route::get   ('/inventory/movements',      [InventoryItemController::class, 'movements']);
+    Route::post  ('/inventory/stocktake',      [InventoryItemController::class, 'stocktake']);
     Route::get   ('/inventory',                [InventoryItemController::class, 'index']);
     Route::post  ('/inventory',                [InventoryItemController::class, 'store']);
     Route::get   ('/inventory/{item}',         [InventoryItemController::class, 'show']);

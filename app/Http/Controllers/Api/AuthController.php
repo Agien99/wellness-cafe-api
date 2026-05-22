@@ -24,7 +24,7 @@ class AuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        $user = User::with('role')->where('username', $credentials['username'])->first();
+        $user = User::with(['role', 'roles'])->where('username', $credentials['username'])->first();
 
         if (!$user || !Hash::check($credentials['password'], $user->password)) {
             throw ValidationException::withMessages([
@@ -69,25 +69,50 @@ class AuthController extends Controller
      */
     public function me(Request $request): JsonResponse
     {
-        $user = $request->user()->load('role');
+        $user = $request->user()->load(['role', 'roles']);
         return response()->json(['user' => $this->presentUser($user)]);
     }
 
-    /** Shape the user payload consistently. */
+    /**
+     * Shape the user payload consistently.
+     * Returns the primary role (display label) AND the full set of roles
+     * the user holds — the frontend uses `permissions` (merged across all
+     * roles) for nav-visibility checks.
+     */
     private function presentUser(User $user): array
     {
-        return [
-            'id'        => $user->id,
-            'name'      => $user->name,
-            'username'  => $user->username,
-            'email'     => $user->email,
-            'phone'     => $user->phone,
-            'active'    => $user->active,
-            'role'      => [
+        $allRoles = $user->roles->map(fn ($r) => [
+            'id'          => $r->id,
+            'name'        => $r->name,
+            'permissions' => $r->permissions,
+        ])->values();
+
+        // Fallback if no pivot rows exist for some reason
+        if ($allRoles->isEmpty() && $user->role) {
+            $allRoles = collect([[
                 'id'          => $user->role->id,
                 'name'        => $user->role->name,
                 'permissions' => $user->role->permissions,
-            ],
+            ]]);
+        }
+
+        return [
+            'id'          => $user->id,
+            'name'        => $user->name,
+            'username'    => $user->username,
+            'email'       => $user->email,
+            'phone'       => $user->phone,
+            'active'      => $user->active,
+            // Primary role — display label (e.g. "Cashier" in sidebar)
+            'role'        => $user->role ? [
+                'id'          => $user->role->id,
+                'name'        => $user->role->name,
+                'permissions' => $user->role->permissions,
+            ] : null,
+            // All roles the user holds
+            'roles'       => $allRoles,
+            // Merged permission keys across all roles
+            'permissions' => $user->permissions(),
         ];
     }
 }

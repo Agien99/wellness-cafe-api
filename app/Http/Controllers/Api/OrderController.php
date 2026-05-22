@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Services\DuitNowQRService;
 use App\Services\OrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -90,5 +91,29 @@ class OrderController extends Controller
         return response()->json(
             $order->fresh()->load(['items', 'payment', 'customer', 'table', 'cashier'])
         );
+    }
+
+    /**
+     * GET /api/orders/{order}/duitnow-qr
+     * Returns the EMV-format DuitNow QR payload for this order, plus the
+     * data the cashier UI needs (amount, order_no) to display the QR to
+     * the customer. Only valid while the order is pending_payment.
+     */
+    public function duitnowQr(Order $order, DuitNowQRService $qr): JsonResponse
+    {
+        if (!config('duitnow.enabled', true)) {
+            return response()->json(['message' => 'DuitNow QR is disabled on this server.'], 422);
+        }
+        if ($order->status !== 'pending_payment') {
+            return response()->json(['message' => 'Order is not awaiting payment.'], 422);
+        }
+
+        return response()->json([
+            'order_no'      => $order->order_no,
+            'amount'        => (float) $order->total,
+            'currency'      => 'MYR',
+            'merchant_name' => config('duitnow.merchant_name'),
+            'payload'       => $qr->payloadFor($order),
+        ]);
     }
 }

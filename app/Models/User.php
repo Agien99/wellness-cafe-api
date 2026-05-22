@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -32,9 +33,16 @@ class User extends Authenticatable
         ];
     }
 
+    /** Primary role — used for the display label ("Cashier", "Manager"). */
     public function role(): BelongsTo
     {
         return $this->belongsTo(Role::class);
+    }
+
+    /** All roles a user holds. Permissions are the merged set across these. */
+    public function roles(): BelongsToMany
+    {
+        return $this->belongsToMany(Role::class, 'user_roles')->withTimestamps();
     }
 
     public function orders(): HasMany
@@ -47,11 +55,28 @@ class User extends Authenticatable
         return $this->hasMany(AuditLog::class);
     }
 
-    /** Convenience: check if user has a permission key */
+    /**
+     * Merged list of permission keys this user has via *any* of their roles.
+     * Returns ['*'] if any role grants super-admin access.
+     */
+    public function permissions(): array
+    {
+        $roles = $this->relationLoaded('roles') ? $this->roles : $this->roles()->get();
+        $merged = [];
+        foreach ($roles as $r) {
+            foreach (($r->permissions ?? []) as $p) $merged[$p] = true;
+        }
+        // Fallback to primary role if pivot is empty (shouldn't happen after backfill)
+        if (empty($merged) && $this->role) {
+            foreach (($this->role->permissions ?? []) as $p) $merged[$p] = true;
+        }
+        return array_keys($merged);
+    }
+
+    /** Convenience: check if user has a permission key. */
     public function hasPermission(string $key): bool
     {
-        if (!$this->role) return false;
-        $perms = $this->role->permissions ?? [];
-        return in_array('*', $perms) || in_array($key, $perms);
+        $perms = $this->permissions();
+        return in_array('*', $perms, true) || in_array($key, $perms, true);
     }
 }
