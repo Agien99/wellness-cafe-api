@@ -36,12 +36,19 @@ const state = {
 };
 
 const currentUser = state.user;
-const currentRole = state.role;
+const currentRole = state.role; // primary role — used for display label only
 
+/**
+ * Permission check. Uses the merged permission list across ALL roles
+ * the user holds (set by the backend on login / /me). Falls back to the
+ * primary role's permissions for older session payloads.
+ */
 function hasPermission(key) {
-  if (!currentRole) return false;
-  if ((currentRole.permissions || []).includes('*')) return true;
-  return (currentRole.permissions || []).includes(key);
+  const perms = (currentUser && currentUser.permissions)
+              || (currentRole && currentRole.permissions)
+              || [];
+  if (perms.includes('*')) return true;
+  return perms.includes(key);
 }
 
 // ---------- Helpers ---------- //
@@ -118,6 +125,7 @@ const NAV = [
   { key: 'orders',    label: 'Orders',          icon: '📋' },
   { section: 'Management' },
   { key: 'menu',      label: 'Menu & Products', icon: '🍽️' },
+  { key: 'tables',    label: 'Dining Tables',   icon: '🪑' },
   { key: 'inventory', label: 'Inventory',       icon: '📦' },
   { key: 'purchase',  label: 'Purchase Orders', icon: '🛒' },
   { key: 'customer',  label: 'Customers',       icon: '👥' },
@@ -131,7 +139,7 @@ const NAV = [
 
 const PERM_MAP = {
   dashboard:'dashboard', pos:'pos', kds:'kds', orders:'pos',
-  menu:'menu', inventory:'inventory', purchase:'purchase',
+  menu:'menu', tables:'menu', inventory:'inventory', purchase:'purchase',
   customer:'customer', promo:'promo', refund:'refund',
   reports:'reports', users:'users', audit:'audit',
 };
@@ -147,9 +155,12 @@ function renderNav() {
     </button></li>`;
   }).join('');
   $$('#navList .nav-link').forEach(b => b.addEventListener('click', () => route(b.dataset.route)));
+  const roleLabel = (currentUser.roles && currentUser.roles.length > 1)
+    ? currentUser.roles.map(r => r.name).join(' · ')
+    : (currentRole?.name || '—');
   $('#userCard').innerHTML = `
     <div class="avatar">${currentUser.name.charAt(0)}</div>
-    <div class="info"><b>${currentUser.name}</b><small>${currentRole.name}</small></div>`;
+    <div class="info"><b>${currentUser.name}</b><small>${roleLabel}</small></div>`;
 }
 
 let currentRoute = null;
@@ -159,6 +170,7 @@ const PAGE_META = {
   kds:       ['Kitchen Display',    'Live order queue for the kitchen'],
   orders:    ['Order Management',   'All orders across all channels'],
   menu:      ['Menu & Products',    'Manage categories, products & pricing'],
+  tables:    ['Dining Tables',      'Manage QR ordering tables for the cafe'],
   inventory: ['Inventory',          'Stock control & ingredients'],
   purchase:  ['Purchase Orders',    'Manage suppliers & procurement'],
   customer:  ['Customers & Loyalty','Customer database & loyalty programme'],
@@ -826,6 +838,18 @@ async function takePaymentForOrder(orderId) {
         <input type="number" id="amtRcv2" class="search" style="font-size:18px;padding:14px" value="${total.toFixed(2)}" step="0.01">
         <div class="alert alert-info mt-3" style="font-size:15px">Change: <b id="changeAmt2">${state.meta.currency} 0.00</b></div>
       </div>
+
+      <div id="qrSection2" style="display:none">
+        <div class="section-title">DuitNow QR — Show this to the customer</div>
+        <div class="qr-pay-card" id="qrPayCard">
+          <div class="qr-pay-loading">Generating QR…</div>
+        </div>
+        <div class="alert alert-warn mt-3" style="font-size:13px">
+          <b>Verify before confirming:</b> Check your bank app notification for
+          <b id="qrVerifyAmt">${money(total)}</b> with reference <code id="qrVerifyRef">${o.order_no}</code>,
+          then click <b>Confirm Payment</b> below.
+        </div>
+      </div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal()">Cancel</button>
@@ -833,11 +857,49 @@ async function takePaymentForOrder(orderId) {
     </div>`, {size: 'lg'});
 
   let method = 'cash';
+  let qrLoaded = false;
+
+  async function ensureQrLoaded() {
+    if (qrLoaded) return;
+    try {
+      const data = await API.get(`/orders/${o.id}/duitnow-qr`);
+      const card = $('#qrPayCard');
+      card.innerHTML = `
+        <div class="qr-pay-amount">
+          <div class="lbl">Amount</div>
+          <div class="val">${money(data.amount)}</div>
+        </div>
+        <canvas id="qrCanvas" width="240" height="240"></canvas>
+        <div class="qr-pay-meta">
+          <div><span>Merchant</span><b>${data.merchant_name}</b></div>
+          <div><span>Reference</span><b>${data.order_no}</b></div>
+          <div class="text-muted" style="font-size:11px;margin-top:6px">Powered by DuitNow QR · scan with any Malaysian banking app</div>
+        </div>`;
+      // Render the QR onto the canvas
+      // eslint-disable-next-line no-undef
+      new QRious({
+        element: document.getElementById('qrCanvas'),
+        value: data.payload,
+        size: 240,
+        level: 'M',
+        background: '#ffffff',
+        foreground: '#064e3b',
+      });
+      qrLoaded = true;
+    } catch (err) {
+      $('#qrPayCard').innerHTML = `<div class="alert alert-danger" style="margin:0">
+        Could not generate QR: ${err.payload?.message || err.message}
+      </div>`;
+    }
+  }
+
   $$('.pay-option').forEach(opt => opt.addEventListener('click', () => {
     $$('.pay-option').forEach(x => x.classList.remove('active'));
     opt.classList.add('active');
     method = opt.dataset.m;
     $('#cashSection2').style.display = method === 'cash' ? 'block' : 'none';
+    $('#qrSection2').style.display   = method === 'qr'   ? 'block' : 'none';
+    if (method === 'qr') ensureQrLoaded();
   }));
   $('#amtRcv2').addEventListener('input', e => {
     const change = +e.target.value - total;
@@ -942,6 +1004,7 @@ VIEWS.inventory = async (root) => {
       <div class="stat-pill"><div class="ico" style="background:#fee2e2;color:#991b1b">⚠</div><div><div class="l">Low Stock</div><div class="v">${low.length}</div></div></div>
       <div class="stat-pill"><div class="ico" style="background:#dbeafe;color:#1e40af">💰</div><div><div class="l">Inventory Value</div><div class="v">${money(items.reduce((s,i)=>s+num(i.stock)*num(i.cost_per_unit),0))}</div></div></div>
       <div style="flex:1"></div>
+      <button class="btn" onclick="app.openStocktake()">📋 Stocktake</button>
       <button class="btn primary" onclick="app.openInventoryForm()">+ Add Item</button>
     </div>
     <div class="card">
@@ -1041,6 +1104,93 @@ async function adjustStock(id, name, unit) {
       if (currentRoute==='inventory') route('inventory');
     } catch (err) {
       toast(err.payload?.message || 'Adjust failed', 'error');
+    }
+  });
+}
+
+/* ===== STOCKTAKE (physical count reconciliation) ===== */
+async function openStocktake() {
+  const items = state._inventoryCache || await API.get('/inventory');
+  if (!items.length) { toast('No inventory items yet', 'error'); return; }
+  const rows = items.map(i => `
+    <tr data-id="${i.id}">
+      <td><b>${i.name}</b><div style="font-size:11px;color:#6b7280">${i.unit}</div></td>
+      <td class="text-right" data-system>${num(i.stock).toFixed(2)}</td>
+      <td><input class="stk-input" type="number" step="0.01" min="0" data-system="${i.stock}" style="width:90px;text-align:right" placeholder="—"></td>
+      <td class="text-right" data-var>—</td>
+    </tr>`).join('');
+
+  openModal(`
+    <div class="modal-head"><h3>📋 Stocktake — Physical Count</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="alert alert-info" style="font-size:12.5px">
+        Enter the <b>physical count</b> for each item. Items left blank are skipped. The variance column shows how
+        far off the system was — confirming will write adjustment movements for any item with a non-zero variance.
+      </div>
+      <div class="field">
+        <label>Notes (optional)</label>
+        <input id="stkNote" placeholder="e.g. End-of-day count, Saturday">
+      </div>
+      <div class="card" style="margin-top:8px;max-height:50vh;overflow:auto">
+        <table class="data">
+          <thead><tr><th>Item</th><th class="text-right">System</th><th class="text-right">Physical</th><th class="text-right">Variance</th></tr></thead>
+          <tbody id="stkBody">${rows}</tbody>
+        </table>
+      </div>
+      <div class="text-muted text-center mt-3" style="font-size:12px">
+        <b id="stkSummary">No items counted yet.</b>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" id="stkSave" disabled>Apply Stocktake</button>
+    </div>`, { size: 'lg' });
+
+  function recomputeSummary() {
+    let counted = 0, varSum = 0, posVar = 0, negVar = 0;
+    $$('.stk-input').forEach(inp => {
+      if (inp.value === '' || inp.value === null) return;
+      counted++;
+      const sys = parseFloat(inp.dataset.system);
+      const phy = parseFloat(inp.value);
+      const v = +(phy - sys).toFixed(2);
+      varSum += v;
+      if (v > 0) posVar += v;
+      else if (v < 0) negVar += v;
+      const cell = inp.closest('tr').querySelector('[data-var]');
+      cell.innerHTML = v === 0
+        ? '<span class="badge badge-success">0</span>'
+        : v > 0
+          ? `<span class="badge badge-info">+${v.toFixed(2)}</span>`
+          : `<span class="badge badge-danger">${v.toFixed(2)}</span>`;
+    });
+    $('#stkSummary').textContent = counted === 0
+      ? 'No items counted yet.'
+      : `${counted} item(s) counted · Variance +${posVar.toFixed(2)} / ${negVar.toFixed(2)} (net ${varSum.toFixed(2)})`;
+    $('#stkSave').disabled = counted === 0;
+  }
+  $('#stkBody').addEventListener('input', e => {
+    if (e.target.classList.contains('stk-input')) recomputeSummary();
+  });
+
+  $('#stkSave').addEventListener('click', async () => {
+    const counts = [];
+    $$('.stk-input').forEach(inp => {
+      if (inp.value === '' || inp.value === null) return;
+      counts.push({
+        inventory_item_id: +inp.closest('tr').dataset.id,
+        physical_count: parseFloat(inp.value),
+      });
+    });
+    if (!counts.length) { toast('Enter at least one physical count', 'error'); return; }
+    if (!confirm(`Apply stocktake to ${counts.length} item(s)? This will adjust stock and write audit movements.`)) return;
+    try {
+      const res = await API.post('/inventory/stocktake', { note: $('#stkNote').value.trim() || null, counts });
+      toast(`Stocktake complete — ${res.adjusted} item(s) adjusted`);
+      closeModal();
+      route('inventory');
+    } catch (err) {
+      toast(err.payload?.message || 'Stocktake failed', 'error');
     }
   });
 }
@@ -1561,6 +1711,81 @@ async function receivePurchase(id) {
 }
 
 /* ===== PROMOTIONS (full CRUD) ===== */
+/* ===== Dining Tables (CRUD) ===== */
+VIEWS.tables = async (root) => {
+  const tables = await API.get('/tables');
+  state.tables = tables;
+  root.innerHTML = `
+    <div class="toolbar">
+      <button class="btn primary" onclick="app.openTableForm()">+ Add Table</button>
+      <span class="text-muted" style="margin-left:auto;font-size:12.5px">${tables.length} active table(s) · customers see these in the QR ordering page</span>
+    </div>
+    <div class="card"><table class="data">
+      <thead><tr><th>Table</th><th class="text-right">Capacity</th><th>Status</th><th></th></tr></thead>
+      <tbody>${tables.map(t => `<tr>
+        <td><b>${t.name}</b></td>
+        <td class="text-right">${t.capacity} pax</td>
+        <td><span class="badge badge-${t.status==='available'?'success':t.status==='occupied'?'warn':'info'}">${t.status}</span></td>
+        <td class="text-right"><button class="btn sm" onclick="app.openTableForm(${t.id})">Edit</button></td>
+      </tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted">No tables yet — add one to start QR ordering.</td></tr>'}</tbody>
+    </table></div>`;
+};
+
+async function openTableForm(id) {
+  const isNew = !id;
+  const t = isNew
+    ? { name:'', capacity: 4, status: 'available' }
+    : state.tables.find(x => x.id === id);
+  openModal(`
+    <div class="modal-head"><h3>${isNew?'Add Table':'Edit Table'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="field"><label>Table Name / Number</label><input id="tName" value="${t.name||''}" placeholder="e.g. T1, T2, A-01" maxlength="16"></div>
+        <div class="field"><label>Capacity (seats)</label><input id="tCap" type="number" min="1" max="50" value="${t.capacity||4}"></div>
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select id="tStatus">
+          <option value="available" ${t.status==='available'?'selected':''}>Available</option>
+          <option value="occupied"  ${t.status==='occupied'?'selected':''}>Occupied</option>
+          <option value="reserved"  ${t.status==='reserved'?'selected':''}>Reserved</option>
+        </select>
+        <small class="text-muted">Only <b>available</b> tables appear in the customer QR page picker.</small>
+      </div>
+    </div>
+    <div class="modal-foot">
+      ${!isNew?`<button class="btn danger" onclick="app.deleteTable(${id})">🗑 Remove</button>`:''}
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" id="saveTable">${isNew?'Create':'Save'}</button>
+    </div>`);
+  $('#saveTable').addEventListener('click', async () => {
+    const body = {
+      name:     $('#tName').value.trim(),
+      capacity: +$('#tCap').value,
+      status:   $('#tStatus').value,
+    };
+    if (!body.name) { toast('Table name is required', 'error'); return; }
+    if (!body.capacity || body.capacity < 1) { toast('Capacity must be at least 1', 'error'); return; }
+    try {
+      if (isNew) await API.post('/tables', body);
+      else       await API.put('/tables/' + id, body);
+      toast('Saved'); closeModal(); route('tables');
+    } catch (err) {
+      const msg = err.payload?.errors?.name?.[0]
+               || err.payload?.errors?.capacity?.[0]
+               || err.payload?.message
+               || 'Save failed';
+      toast(msg, 'error');
+    }
+  });
+}
+
+async function deleteTable(id) {
+  if (!confirm('Remove this table? Existing orders that reference it will still work, but it will disappear from the QR ordering picker.')) return;
+  try { await API.delete('/tables/' + id); toast('Table removed'); closeModal(); route('tables'); }
+  catch (err) { toast(err.payload?.message || 'Delete failed', 'error'); }
+}
+
 VIEWS.promo = async (root) => {
   const promos = await API.get('/promotions?all=1');
   state.promotions = promos;
@@ -1674,15 +1899,22 @@ VIEWS.users = async (root) => {
         <div class="toolbar"><button class="btn primary" onclick="app.openUserForm()">+ New User</button></div>
         <div class="card"><table class="data">
           <thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Phone</th><th>Role</th><th>Status</th><th></th></tr></thead>
-          <tbody>${users.map(u=>`<tr>
-            <td><b>${u.name}</b></td>
-            <td><code>${u.username}</code></td>
-            <td>${u.email}</td>
-            <td>${u.phone||'-'}</td>
-            <td><span class="badge badge-info">${u.role?.name||'-'}</span></td>
-            <td><span class="badge ${u.active?'badge-success':'badge-danger'}">${u.active?'Active':'Inactive'}</span></td>
-            <td><button class="btn sm" onclick="app.openUserForm(${u.id})">Edit</button></td>
-          </tr>`).join('')}</tbody>
+          <tbody>${users.map(u=>{
+            const allRoles = (u.roles && u.roles.length) ? u.roles : (u.role ? [u.role] : []);
+            const roleBadges = allRoles.map(r => {
+              const isPrimary = r.id === u.role_id;
+              return `<span class="badge ${isPrimary?'badge-info':'badge-purple'}" style="margin:1px" title="${isPrimary?'Primary role':'Additional role'}">${r.name}${isPrimary && allRoles.length>1?' ★':''}</span>`;
+            }).join('') || '-';
+            return `<tr>
+              <td><b>${u.name}</b></td>
+              <td><code>${u.username}</code></td>
+              <td>${u.email}</td>
+              <td>${u.phone||'-'}</td>
+              <td>${roleBadges}</td>
+              <td><span class="badge ${u.active?'badge-success':'badge-danger'}">${u.active?'Active':'Inactive'}</span></td>
+              <td><button class="btn sm" onclick="app.openUserForm(${u.id})">Edit</button></td>
+            </tr>`;
+          }).join('')}</tbody>
         </table></div>`;
     } else {
       $('#userBody').innerHTML = `<div class="card"><table class="data">
@@ -1697,8 +1929,18 @@ async function openUserForm(id) {
   const isNew = !id;
   const roles = state._rolesCache;
   const u = isNew
-    ? { name:'', username:'', email:'', phone:'', role_id: 3, active: true }
+    ? { name:'', username:'', email:'', phone:'', role_id: 3, roles: [], active: true }
     : state._usersCache.find(x => x.id === id);
+  // Set of role IDs this user currently holds (across primary + additional)
+  const heldIds = new Set(
+    ((u.roles && u.roles.length) ? u.roles.map(r => r.id) : [u.role_id]).filter(Boolean)
+  );
+  const rolesChecklist = roles.map(r =>
+    `<label class="role-pick" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin:4px 0;cursor:pointer">
+      <input type="checkbox" class="uRoleChk" value="${r.id}" ${heldIds.has(r.id)?'checked':''}>
+      <span style="flex:1"><b>${r.name}</b><br><small class="text-muted">${(r.permissions||[]).includes('*')?'All access':(r.permissions||[]).join(', ')}</small></span>
+    </label>`
+  ).join('');
   openModal(`
     <div class="modal-head"><h3>${isNew?'New User':'Edit User'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
     <div class="modal-body">
@@ -1708,11 +1950,15 @@ async function openUserForm(id) {
       </div>
       <div class="form-row">
         <div class="field"><label>Password ${isNew?'':'(leave blank to keep current)'}</label><input id="uPass" type="password" placeholder="${isNew?'Required':'Unchanged'}"></div>
-        <div class="field"><label>Role</label><select id="uRole">${roles.map(r=>`<option value="${r.id}" ${r.id===u.role_id?'selected':''}>${r.name}</option>`).join('')}</select></div>
+        <div class="field"><label>Email</label><input id="uEmail" type="email" value="${u.email||''}"></div>
       </div>
       <div class="form-row">
-        <div class="field"><label>Email</label><input id="uEmail" type="email" value="${u.email||''}"></div>
         <div class="field"><label>Phone</label><input id="uPhone" value="${u.phone||''}"></div>
+        <div class="field"><label>Primary Role <small class="text-muted">(shown in sidebar)</small></label><select id="uRole">${roles.map(r=>`<option value="${r.id}" ${r.id===u.role_id?'selected':''}>${r.name}</option>`).join('')}</select></div>
+      </div>
+      <div class="field">
+        <label>Assigned Roles <small class="text-muted">(a user can hold more than one — permissions are merged)</small></label>
+        ${rolesChecklist}
       </div>
       <div class="field"><label><input type="checkbox" id="uActive" ${u.active?'checked':''}> Active</label></div>
     </div>
@@ -1721,16 +1967,26 @@ async function openUserForm(id) {
       <button class="btn" onclick="closeModal()">Cancel</button>
       <button class="btn primary" id="saveUser">${isNew?'Create':'Save'}</button>
     </div>`);
+  // Ensure the primary role is always among the checked additional roles
+  $('#uRole').addEventListener('change', () => {
+    const primary = +$('#uRole').value;
+    $$('.uRoleChk').forEach(cb => { if (+cb.value === primary) cb.checked = true; });
+  });
   $('#saveUser').addEventListener('click', async () => {
     const name = $('#uName').value.trim();
     const un = $('#uUser').value.trim();
     if (!name || !un) { toast('Name and username required', 'error'); return; }
     const pass = $('#uPass').value;
     if (isNew && !pass) { toast('Password required', 'error'); return; }
+    const primaryRole = +$('#uRole').value;
+    const roleIds = $$('.uRoleChk').filter(cb => cb.checked).map(cb => +cb.value);
+    if (!roleIds.includes(primaryRole)) roleIds.push(primaryRole);
     const body = {
       name, username: un,
       email: $('#uEmail').value, phone: $('#uPhone').value,
-      role_id: +$('#uRole').value, active: $('#uActive').checked,
+      role_id: primaryRole,
+      role_ids: roleIds,
+      active: $('#uActive').checked,
     };
     if (pass) body.password = pass;
     try {
@@ -1763,6 +2019,8 @@ window.app = {
   openCategoryForm, deleteCategory,
   // Customers
   openCustomerForm, deleteCustomer,
+  // Tables
+  openTableForm, deleteTable,
   // Promotions
   openPromoForm, deletePromo,
   // Suppliers + Purchase
@@ -1771,6 +2029,7 @@ window.app = {
   // Inventory
   openInventoryForm, deleteInventory,
   adjustStock,
+  openStocktake,
   // Users
   openUserForm, deleteUser,
 };

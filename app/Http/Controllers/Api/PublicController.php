@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\Table;
+use App\Services\DuitNowQRService;
 use App\Services\OrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -84,5 +86,78 @@ class PublicController extends Controller
         }
 
         return response()->json($order->load('items', 'table'), 201);
+    }
+
+    /**
+     * GET /api/public/orders/{orderNo}/status — read-only status check used
+     * by the customer's phone to poll progress of their order after placing it.
+     * Returns a minimal payload (no internal IDs, no audit info).
+     */
+    public function orderStatus(string $orderNo): JsonResponse
+    {
+        $order = Order::with(['items', 'table'])
+            ->where('order_no', $orderNo)
+            ->first();
+
+        if (!$order) {
+            return response()->json(['message' => 'Order not found'], 404);
+        }
+
+        // Derive a single high-level "stage" the UI displays:
+        //   waiting_payment → preparing → ready → completed
+        $stage = match (true) {
+            $order->status === 'pending_payment'        => 'waiting_payment',
+            $order->status === 'refunded'               => 'refunded',
+            $order->status === 'cancelled'              => 'cancelled',
+            $order->kitchen_status === 'completed'      => 'completed',
+            $order->kitchen_status === 'ready'          => 'ready',
+            $order->kitchen_status === 'preparing'      => 'preparing',
+            default                                     => 'preparing', // paid + pending = waiting on kitchen
+        };
+
+        return response()->json([
+            'order_no'       => $order->order_no,
+            'stage'          => $stage,
+            'status'         => $order->status,
+            'kitchen_status' => $order->kitchen_status,
+            'customer_name'  => $order->customer_name,
+            'table'          => $order->table?->name,
+            'total'          => (float) $order->total,
+            'items'          => $order->items->map(fn ($i) => [
+                'name' => $i->name,
+                'qty'  => (int) $i->qty,
+            ]),
+            'placed_at'      => $order->created_at?->toIso8601String(),
+        ]);
+    }
+
+    /**
+     * GET /api/public/orders/{orderNo}/duitnow-qr
+     * Public sibling of the staff-side endpoint — returns the DuitNow QR
+     * payload so the customer's own phone can display it on the status page.
+     * Customer screenshots the QR and uploads it to their banking app's
+     * "Pay via QR → Upload from Gallery" flow.
+     *
+     * Only valid while the order is in pending_payment state.
+     */
+    public function orderDuitnowQr(string $orderNo, DuitNowQRService $qr): JsonResponse
+    {
+        if (!config('duitnow.enabled', true)) {
+            return response()->json(['message' => 'DuitNow QR is disabled on this server.'], 422);
+        }
+        $order = Order::where('order_no', $orderNo)->first();
+        if (!$order) {
+            return response()->json(['message' => 'Order not found'], 404);
+        }
+        if ($order->status !== 'pending_payment') {
+            return response()->json(['message' => 'Order is not awaiting payment.'], 422);
+        }
+        return response()->json([
+            'order_no'      => $order->order_no,
+            'amount'        => (float) $order->total,
+            'currency'      => 'MYR',
+            'merchant_name' => config('duitnow.merchant_name'),
+            'payload'       => $qr->payloadFor($order),
+        ]);
     }
 }

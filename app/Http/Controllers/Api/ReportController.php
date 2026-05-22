@@ -71,7 +71,9 @@ class ReportController extends Controller
                 'total'   => Customer::count(),
                 'members' => Customer::where('membership', '!=', 'None')->count(),
             ],
-            'pending_kitchen' => Order::whereIn('kitchen_status', ['pending', 'preparing'])->count(),
+            'pending_kitchen' => Order::whereIn('kitchen_status', ['pending', 'preparing'])
+                ->where('status', '!=', 'pending_payment')
+                ->count(),
             'pending_payment' => Order::where('status', 'pending_payment')->count(),
             'low_stock'       => InventoryItem::whereColumn('stock', '<=', 'reorder_level')->count(),
             'top_products'    => $topProducts,

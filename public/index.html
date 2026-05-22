@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wellness Cafe — Order</title>
 <link rel="stylesheet" href="css/styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 </head>
 <body>
 
@@ -35,6 +36,9 @@
       <div class="qr-cat-tabs" id="qrCatTabs"></div>
       <div class="qr-product-list" id="qrProducts"></div>
     </div>
+
+    <!-- Live order status (shown after a customer has placed an order) -->
+    <div id="statusView" class="hidden"></div>
   </div>
 
   <div class="qr-cart-bar hidden" id="qrCartBar">
@@ -229,28 +233,221 @@ async function placeOrder() {
       customer_name: customerName,
       notes,
     });
-    $('#modalRoot').innerHTML = `<div class="modal-backdrop"><div class="modal">
-      <div class="modal-head"><h3>✅ Order Placed</h3></div>
-      <div class="modal-body" style="text-align:center">
-        <div style="font-size:64px;margin-bottom:10px">🎉</div>
-        <h3 style="color:#10b981;font-size:22px">Thank you, ${customerName}!</h3>
-        <p style="margin-top:10px;font-size:14px;color:#475569">Your order number is</p>
-        <div style="font-size:28px;font-weight:800;color:#064e3b;margin:10px 0">${order.order_no}</div>
-        <p style="font-size:13px;color:#475569">${tableId?`Order will be served to <b>Table ${tables.find(t=>t.id===tableId).name}</b>`:'Please pick up at the counter when ready.'}</p>
-        <div class="alert alert-warn mt-3" style="font-size:12px">Please proceed to the counter to complete payment.</div>
-        <div class="alert alert-info" style="font-size:12px"><b>Total Due:</b> ${money(order.total)}</div>
-      </div>
-      <div class="modal-foot">
-        <button class="btn primary block lg" onclick="location.reload()">Start New Order</button>
-      </div>
-    </div></div>`;
+    // Close the cart modal and switch the page to the live status view
+    $('#modalRoot').innerHTML = '';
     cart = [];
+    refreshCartBar();
+    // Persist so a phone reload still shows the customer's order
+    try { localStorage.setItem('wc_active_order', order.order_no); } catch(e){}
+    showStatusView(order.order_no);
   } catch (err) {
     toast(err.payload?.message || 'Order failed: ' + err.message, 'error');
   }
 }
 
-loadData();
+/* ===== Live order status (post-order) ===== */
+let statusPollTimer = null;
+let lastStage = null;
+let qrPayloadCache = null; // cache the DuitNow QR payload so we don't re-fetch on every poll
+const STATUS_POLL_MS = 5000;
+
+const STAGES = [
+  { key:'waiting_payment', label:'Awaiting payment', icon:'💳', detail:'Scan the QR below to pay from your phone, or pay at the counter.' },
+  { key:'preparing',       label:'Preparing',      icon:'👨‍🍳', detail:'The kitchen has received your order.' },
+  { key:'ready',           label:'Ready for pickup', icon:'🛎', detail:'Your order is ready — please collect it.' },
+  { key:'completed',       label:'Picked up',       icon:'✅', detail:'Enjoy! Thank you for visiting.' },
+];
+
+function stopStatusPoll() {
+  if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
+}
+
+function showStatusView(orderNo) {
+  $('#tablePicker').classList.add('hidden');
+  $('#menuArea').classList.add('hidden');
+  $('#qrCartBar').classList.add('hidden');
+  $('#statusView').classList.remove('hidden');
+  $('#tableInfo').textContent = `📋 Order ${orderNo}`;
+  lastStage = null;
+  qrPayloadCache = null;
+  fetchAndRenderStatus(orderNo);
+  stopStatusPoll();
+  statusPollTimer = setInterval(() => fetchAndRenderStatus(orderNo), STATUS_POLL_MS);
+}
+
+/**
+ * Ensure the DuitNow QR is drawn into the #payQrSlot container.
+ * Called after every status render while stage === 'waiting_payment'.
+ * Fetches the QR payload the first time, caches it for subsequent renders.
+ */
+async function ensurePayQrRendered(orderNo) {
+  const slot = document.getElementById('payQrSlot');
+  if (!slot) return;
+  // Fetch payload once and cache
+  if (!qrPayloadCache) {
+    try {
+      qrPayloadCache = await fetchJson('GET', `/orders/${encodeURIComponent(orderNo)}/duitnow-qr`);
+    } catch (err) {
+      slot.innerHTML = `<div class="alert alert-warn" style="font-size:12px;margin:0">
+        Could not generate QR (${err.payload?.message || err.message}). Please pay at the counter.
+      </div>`;
+      return;
+    }
+  }
+  // Build canvas (fresh on every render — innerHTML wipes it)
+  slot.innerHTML = '<canvas id="payQrCanvas" width="220" height="220" style="display:block;margin:auto"></canvas>';
+  try {
+    new QRious({
+      element: document.getElementById('payQrCanvas'),
+      value: qrPayloadCache.payload,
+      size: 220,
+      level: 'M',
+      background: '#ffffff',
+      foreground: '#064e3b',
+    });
+  } catch (err) {
+    slot.innerHTML = `<div class="alert alert-warn" style="font-size:12px;margin:0">
+      Could not render QR. Please pay at the counter.
+    </div>`;
+  }
+}
+
+async function fetchAndRenderStatus(orderNo) {
+  try {
+    const data = await fetchJson('GET', `/orders/${encodeURIComponent(orderNo)}/status`);
+    renderStatusView(data);
+  } catch (err) {
+    if (err.message?.includes('404') || err.payload?.message === 'Order not found') {
+      stopStatusPoll();
+      try { localStorage.removeItem('wc_active_order'); } catch(e){}
+      $('#statusView').innerHTML = `
+        <div class="card text-center" style="margin:14px 0;padding:20px">
+          <div style="font-size:48px">❓</div>
+          <h3>Order not found</h3>
+          <p class="text-muted" style="font-size:13px">This order is no longer available.</p>
+          <button class="btn primary lg block mt-3" onclick="location.reload()">Start New Order</button>
+        </div>`;
+    }
+    // network blips: leave the previous render visible, retry next tick
+  }
+}
+
+function renderStatusView(d) {
+  const stageIndex = STAGES.findIndex(s => s.key === d.stage);
+  const cur = STAGES[stageIndex] || STAGES[1];
+
+  // Buzz + flash the first time the order becomes "ready"
+  if (d.stage === 'ready' && lastStage && lastStage !== 'ready') {
+    try { if (navigator.vibrate) navigator.vibrate([200, 80, 200, 80, 400]); } catch(e){}
+    document.body.style.animation = 'qrFlash 1s ease 3';
+    setTimeout(() => document.body.style.animation = '', 3500);
+  }
+  lastStage = d.stage;
+
+  const stepsHtml = STAGES.map((s, i) => {
+    const done = i < stageIndex;
+    const active = i === stageIndex;
+    const cls = done ? 'done' : active ? 'active' : 'todo';
+    return `<div class="status-step ${cls}">
+      <div class="dot">${done ? '✓' : (i+1)}</div>
+      <div class="lbl"><b>${s.icon} ${s.label}</b></div>
+    </div>`;
+  }).join('');
+
+  const heroCls = d.stage === 'ready' ? 'hero-ready'
+                : d.stage === 'waiting_payment' ? 'hero-pay'
+                : d.stage === 'completed' ? 'hero-done'
+                : 'hero-cooking';
+
+  const headline = {
+    waiting_payment: 'Pay to start your order',
+    preparing:       'Preparing your order…',
+    ready:           '🎉 Ready for pickup!',
+    completed:       'Order complete',
+    refunded:        'Order refunded',
+    cancelled:       'Order cancelled',
+  }[d.stage] || 'Tracking your order…';
+
+  const itemsHtml = (d.items || []).map(i => `<li><b>${i.qty}×</b> ${i.name}</li>`).join('');
+
+  // DuitNow QR card — only when awaiting payment.
+  // We render it as a placeholder div first; the QR canvas is drawn after the
+  // HTML is in the DOM (so QRious can find the canvas element).
+  const payCard = d.stage === 'waiting_payment' ? `
+    <div class="card pay-card">
+      <div class="card-header"><h3>💳 Pay with DuitNow QR</h3></div>
+      <div class="pay-card-amount">
+        <div class="lbl">Amount</div>
+        <div class="val">${money(d.total)}</div>
+      </div>
+      <div id="payQrSlot" class="pay-qr-slot">
+        <div class="pay-qr-loading">Generating QR…</div>
+      </div>
+      <ol class="pay-instructions">
+        <li><b>Save</b> or screenshot the QR above (long-press the image on most phones).</li>
+        <li>Open your banking app (Maybank, CIMB, MAE, TNG, Boost, etc.) → tap <b>Pay</b> or <b>Scan QR</b>.</li>
+        <li>Tap <b>Upload from gallery</b> and pick the saved QR.</li>
+        <li>The amount and reference are pre-filled — just confirm and pay.</li>
+      </ol>
+      <div class="pay-alt">
+        <span>Prefer cash or card?</span> <b>Just walk up to the counter</b> — the cashier will help you pay there.
+      </div>
+      <div class="text-muted text-center" style="font-size:11px;margin-top:8px">
+        Once you pay, this page will update automatically within a few seconds.
+      </div>
+    </div>` : '';
+
+  $('#statusView').innerHTML = `
+    <div class="status-hero ${heroCls}">
+      <div class="status-icon">${cur.icon}</div>
+      <h2>${headline}</h2>
+      <div class="status-detail">${cur.detail}</div>
+      <div class="status-orderno">Order <b>${d.order_no}</b></div>
+    </div>
+
+    <div class="status-steps card">
+      ${stepsHtml}
+    </div>
+
+    ${payCard}
+
+    <div class="card">
+      <div class="card-header"><h3>Your Order</h3></div>
+      <ul class="status-items">${itemsHtml}</ul>
+      <div class="status-summary">
+        <span>Total</span>
+        <b>${money(d.total)}</b>
+      </div>
+      ${d.table ? `<div class="text-muted text-center" style="font-size:12px;margin-top:6px">Table ${d.table}</div>` : `<div class="text-muted text-center" style="font-size:12px;margin-top:6px">Takeaway — collect at counter</div>`}
+    </div>
+
+    <div class="text-center mt-3" style="padding-bottom:24px">
+      <small class="text-muted">This page refreshes automatically every ${STATUS_POLL_MS/1000}s.</small><br>
+      <button class="btn mt-3" onclick="startNewOrderFromStatus()">Start New Order</button>
+    </div>
+  `;
+
+  // Render the DuitNow QR canvas after the HTML is in the DOM
+  if (d.stage === 'waiting_payment') ensurePayQrRendered(d.order_no);
+  else qrPayloadCache = null; // free cache once paid
+}
+
+function startNewOrderFromStatus() {
+  if (!confirm('Start a new order? Your current order will keep going on the kitchen side.')) return;
+  try { localStorage.removeItem('wc_active_order'); } catch(e){}
+  location.reload();
+}
+
+// Resume status view if the customer reloads with an active order
+function resumeOrderIfAny() {
+  try {
+    const orderNo = localStorage.getItem('wc_active_order');
+    if (orderNo) { showStatusView(orderNo); return true; }
+  } catch(e){}
+  return false;
+}
+
+if (!resumeOrderIfAny()) loadData();
 </script>
 
 </body>
