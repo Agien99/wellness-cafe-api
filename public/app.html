@@ -13,12 +13,25 @@
 <div class="app-shell">
 
   <!-- ===== Sidebar ===== -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="brand-row">
       <img src="img/logo.png" alt="Wellness Cafe"
            style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#fff"
            onerror="this.outerHTML='<div class=&quot;icon&quot;>☕</div>'">
-      <div class="text">Wellness Cafe<small>Relax · Reflect · Recharge</small></div>
+
+      <div class="text">
+        Wellness Cafe
+        <small>Relax · Reflect · Recharge</small>
+      </div>
+
+      <!-- Mobile close button -->
+      <button
+        type="button"
+        class="sidebar-close"
+        id="sidebarClose"
+        aria-label="Close navigation">
+        ×
+      </button>
     </div>
 
     <ul class="nav-list" id="navList">
@@ -27,30 +40,142 @@
 
     <div class="sidebar-footer">
       <div class="user-card" id="userCard"></div>
-      <button class="btn-logout" id="logoutBtn">⎋ Sign Out</button>
+      <button class="btn-logout" id="logoutBtn">
+        ⎋ Sign Out
+      </button>
     </div>
   </aside>
 
+  <!-- Mobile sidebar backdrop -->
+  <div
+    class="sidebar-backdrop"
+    id="sidebarBackdrop">
+  </div>
+
   <!-- ===== Main ===== -->
   <main class="main">
+
     <header class="topbar">
+
+      <!-- Mobile menu button -->
+      <button
+        type="button"
+        class="mobile-menu-btn"
+        id="mobileMenuBtn"
+        aria-label="Open navigation"
+        aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+
       <div class="page-title">
         <h2 id="pageTitle">Dashboard</h2>
-        <small id="pageSubtitle">Operational overview & live metrics</small>
+        <small id="pageSubtitle">
+          Operational overview & live metrics
+        </small>
       </div>
+
       <div class="clock" id="clock"></div>
+
     </header>
 
     <section class="content" id="content">
       <!-- view rendered here -->
     </section>
+
   </main>
 </div>
 
-<div class="toast-container" id="toastContainer"></div>
+<div
+  class="toast-container"
+  id="toastContainer">
+</div>
+
 <div id="modalRoot"></div>
 
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+
+<script>
+(function () {
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  const openBtn = document.getElementById('mobileMenuBtn');
+  const closeBtn = document.getElementById('sidebarClose');
+  const navList = document.getElementById('navList');
+
+  function openSidebar() {
+    sidebar.classList.add('mobile-open');
+    backdrop.classList.add('show');
+    document.body.classList.add('sidebar-open');
+
+    openBtn.setAttribute(
+      'aria-expanded',
+      'true'
+    );
+  }
+
+  function closeSidebar() {
+    sidebar.classList.remove('mobile-open');
+    backdrop.classList.remove('show');
+    document.body.classList.remove('sidebar-open');
+
+    openBtn.setAttribute(
+      'aria-expanded',
+      'false'
+    );
+  }
+
+  openBtn.addEventListener(
+    'click',
+    openSidebar
+  );
+
+  closeBtn.addEventListener(
+    'click',
+    closeSidebar
+  );
+
+  backdrop.addEventListener(
+    'click',
+    closeSidebar
+  );
+
+  navList.addEventListener(
+    'click',
+    function (event) {
+      if (
+        event.target.closest('.nav-link') &&
+        window.innerWidth <= 900
+      ) {
+        closeSidebar();
+      }
+    }
+  );
+
+  window.addEventListener(
+    'resize',
+    function () {
+      if (window.innerWidth > 900) {
+        closeSidebar();
+      }
+    }
+  );
+
+  document.addEventListener(
+    'keydown',
+    function (event) {
+      if (
+        event.key === 'Escape' &&
+        sidebar.classList.contains('mobile-open')
+      ) {
+        closeSidebar();
+      }
+    }
+  );
+})();
+</script>
+
 </body>
 </html>

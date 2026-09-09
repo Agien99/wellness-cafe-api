@@ -292,270 +292,1391 @@ let pos = {
 
 VIEWS.pos = async (root) => {
   if (pos.categoryId === null) pos.categoryId = state.categories[0]?.id;
+
   root.innerHTML = `
-    <div class="pos-layout">
-      <div class="pos-products">
-        <div class="category-bar" id="catBar"></div>
-        <div class="product-grid" id="prodGrid"></div>
-      </div>
-      <div class="pos-cart">
-        <div class="cart-head">
-          <h3>🛒 Order Cart</h3>
-          <button class="btn-icon" id="clearCart" title="Clear cart">🗑</button>
+    <div class="pos-shell">
+
+      <!-- LEFT: MENU / PRODUCTS -->
+      <section class="pos-menu-panel">
+        <div class="pos-section-header">
+          <div>
+            <span class="pos-eyebrow">POINT OF SALE</span>
+            <h2>Menu</h2>
+            <p>Select an item to add it to the current order.</p>
+          </div>
+
+          <div class="pos-ready-status">
+            <span class="pos-status-dot"></span>
+            Ready
+          </div>
         </div>
-        <div class="cart-meta">
-          <div><label>Customer</label>
+
+        <div class="pos-menu-tools">
+
+          <div class="pos-search-wrap">
+            <span class="pos-search-icon">⌕</span>
+
+            <input
+              type="search"
+              id="posProductSearch"
+              class="pos-product-search"
+              placeholder="Search menu items..."
+              autocomplete="off"
+              aria-label="Search menu items"
+            >
+
+            <button
+              class="pos-search-clear"
+              id="posSearchClear"
+              type="button"
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              ×
+            </button>
+          </div>
+
+        </div>
+
+        <div class="pos-category-wrapper">
+          <div class="category-bar" id="catBar"></div>
+        </div>
+
+        <div class="product-grid" id="prodGrid"></div>
+      </section>
+
+      <!-- RIGHT: CURRENT ORDER -->
+      <aside class="pos-order-panel">
+        <div class="pos-order-header">
+          <div>
+            <span class="pos-eyebrow">CURRENT ORDER</span>
+            <h2>Order Cart</h2>
+          </div>
+
+          <button class="pos-clear-btn" id="clearCart" type="button" title="Clear cart">
+            <span>🗑</span>
+            Clear
+          </button>
+        </div>
+
+        <div class="pos-order-meta">
+          <div class="pos-field pos-field-full">
+            <label for="custSel">Customer</label>
             <select id="custSel">
-              ${state.customers.map(c=>`<option value="${c.id}" ${c.id===pos.customerId?'selected':''}>${c.name}${c.membership!=='None'?' ('+c.membership+')':''}</option>`).join('')}
+              ${state.customers.map(c=>`
+                <option value="${c.id}" ${c.id===pos.customerId?'selected':''}>
+                  ${c.name}${c.membership!=='None'?' ('+c.membership+')':''}
+                </option>
+              `).join('')}
             </select>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div><label>Channel</label>
+
+          <div class="pos-meta-grid">
+            <div class="pos-field">
+              <label for="chanSel">Order Type</label>
               <select id="chanSel">
                 <option value="pos" ${pos.channel==='pos'?'selected':''}>Dine-in / POS</option>
                 <option value="qr" ${pos.channel==='qr'?'selected':''}>QR Order</option>
                 <option value="online" ${pos.channel==='online'?'selected':''}>Online / Pickup</option>
               </select>
             </div>
-            <div><label>Table</label>
+
+            <div class="pos-field">
+              <label for="tableSel">Table</label>
               <select id="tableSel">
-                <option value="">- none -</option>
-                ${state.tables.map(t=>`<option value="${t.id}" ${t.id===pos.tableId?'selected':''}>${t.name} (${t.capacity})</option>`).join('')}
+                <option value="">No table</option>
+                ${state.tables.map(t=>`
+                  <option value="${t.id}" ${t.id===pos.tableId?'selected':''}>
+                    ${t.name} · ${t.capacity} pax
+                  </option>
+                `).join('')}
               </select>
             </div>
           </div>
         </div>
-        <div class="cart-items" id="cartItems"></div>
-        <div class="cart-summary" id="cartSum"></div>
-        <div class="cart-actions">
-          <button class="btn block" id="parkOrder">Park</button>
-          <button class="btn primary block lg" id="payBtn">💳 Pay</button>
+
+        <div class="pos-cart-section">
+          <div class="pos-cart-section-title">
+            <span>Order Items</span>
+            <span class="pos-cart-count" id="cartCount">0 items</span>
+          </div>
+
+          <div class="cart-items" id="cartItems"></div>
         </div>
-      </div>
+
+        <div class="cart-summary pos-order-summary" id="cartSum"></div>
+
+        <div class="cart-actions pos-order-actions">
+          <button class="btn pos-park-btn" id="parkOrder" type="button">
+            Park Order
+          </button>
+
+          <button class="btn primary pos-pay-btn" id="payBtn" type="button">
+            <span>💳</span>
+            Proceed to Payment
+          </button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- MOBILE ONLY: STICKY CART BAR -->
+    <div class="pos-mobile-bar" id="mobilePosBar">
+
+      <button
+        class="pos-mobile-cart-info"
+        id="mobileCartJump"
+        type="button"
+      >
+        <span class="pos-mobile-cart-icon">
+          🛒
+        </span>
+
+        <span class="pos-mobile-cart-text">
+          <b id="mobileCartCount">
+            0 items
+          </b>
+
+          <small>
+            View current order
+          </small>
+        </span>
+      </button>
+
+      <button
+        class="pos-mobile-pay"
+        id="mobilePayBtn"
+        type="button"
+      >
+        <span id="mobileCartTotal">
+          RM 0.00
+        </span>
+
+        <strong>
+          Pay →
+        </strong>
+      </button>
+
     </div>`;
 
-  renderCategoryBar(); renderProductGrid(); renderCart();
+  renderCategoryBar();
+  renderProductGrid();
+  renderCart();
 
-  $('#custSel').addEventListener('change', e => { pos.customerId = +e.target.value; renderCart(); });
-  $('#chanSel').addEventListener('change', e => { pos.channel = e.target.value; });
-  $('#tableSel').addEventListener('change', e => { pos.tableId = e.target.value ? +e.target.value : null; });
-  $('#clearCart').addEventListener('click', () => { pos.cart = []; renderCart(); });
-  $('#parkOrder').addEventListener('click', () => { pos.cart = []; renderCart(); toast('Order parked.', 'success'); });
+  const productSearch =
+    $('#posProductSearch');
+
+  const searchClear =
+    $('#posSearchClear');
+
+  if (productSearch) {
+    productSearch.addEventListener(
+      'input',
+      () => {
+        renderProductGrid();
+        updateSearchClear();
+      }
+    );
+  }
+
+  if (searchClear) {
+    searchClear.addEventListener(
+      'click',
+      () => {
+        productSearch.value = '';
+        productSearch.focus();
+
+        renderProductGrid();
+        updateSearchClear();
+      }
+    );
+  }
+
+  function updateSearchClear() {
+    if (!searchClear || !productSearch) {
+      return;
+    }
+
+    searchClear.classList.toggle(
+      'show',
+      productSearch.value.trim().length > 0
+    );
+  }
+
+  $('#custSel').addEventListener('change', e => {
+    pos.customerId = +e.target.value;
+    renderCart();
+  });
+
+  $('#chanSel').addEventListener('change', e => {
+    pos.channel = e.target.value;
+  });
+
+  $('#tableSel').addEventListener('change', e => {
+    pos.tableId = e.target.value ? +e.target.value : null;
+  });
+
+  $('#clearCart').addEventListener('click', () => {
+    pos.cart = [];
+    renderCart();
+  });
+
+  $('#parkOrder').addEventListener('click', () => {
+    pos.cart = [];
+    renderCart();
+    toast('Order parked.', 'success');
+  });
+
   $('#payBtn').addEventListener('click', openPayModal);
+
+  const mobileCartJump =
+    $('#mobileCartJump');
+
+  const mobilePayBtn =
+    $('#mobilePayBtn');
+
+  if (mobileCartJump) {
+    mobileCartJump.addEventListener(
+      'click',
+      () => {
+        const orderPanel =
+          $('.pos-order-panel');
+
+        if (orderPanel) {
+          orderPanel.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }
+    );
+  }
+
+  if (mobilePayBtn) {
+    mobilePayBtn.addEventListener(
+      'click',
+      openPayModal
+    );
+  }
 
   function renderCategoryBar() {
     $('#catBar').innerHTML = state.categories.map(c =>
-      `<button class="cat-btn ${c.id===pos.categoryId?'active':''}" data-id="${c.id}">${c.icon} ${c.name}</button>`
+      `<button class="cat-btn ${c.id===pos.categoryId?'active':''}" data-id="${c.id}" type="button">
+        <span class="cat-icon">${c.icon}</span>
+        <span>${c.name}</span>
+      </button>`
     ).join('');
+
     $$('#catBar .cat-btn').forEach(b => b.addEventListener('click', () => {
-      pos.categoryId = +b.dataset.id; renderCategoryBar(); renderProductGrid();
+      pos.categoryId = +b.dataset.id;
+      renderCategoryBar();
+      renderProductGrid();
     }));
   }
+
   function renderProductGrid() {
-    const products = state.products.filter(p => p.category_id === pos.categoryId);
-    $('#prodGrid').innerHTML = products.map(p => {
-      const visual = p.image_url
-        ? `<img src="${p.image_url}" style="width:60px;height:60px;border-radius:8px;object-fit:cover">`
-        : (p.image || '🍽');
-      return `<div class="product-card ${p.available?'':'unavail'}" data-id="${p.id}">
-        <div class="img">${visual}</div>
-        <div class="name">${p.name}</div>
-        <div class="price">${money(p.price)}</div>
-      </div>`;
-    }).join('');
-    $$('#prodGrid .product-card').forEach(card => card.addEventListener('click', () => {
-      const p = state.products.find(x => x.id === +card.dataset.id);
-      if (!p || !p.available) { toast('Item not available', 'warn'); return; }
-      const ex = pos.cart.find(x => x.productId === p.id);
-      if (ex) ex.qty += 1;
-      else pos.cart.push({ productId: p.id, name: p.name, price: p.price, qty: 1 });
-      renderCart();
-    }));
-  }
-  function renderCart() {
-    if (pos.cart.length === 0) {
-      $('#cartItems').innerHTML = '<div class="cart-empty"><span class="emoji">🛒</span>Cart is empty</div>';
-      $('#cartSum').innerHTML = `
-        <div class="sum-line"><span>Subtotal</span><span>${money(0)}</span></div>
-        <div class="sum-line"><span>Tax (${(state.meta.taxRate*100).toFixed(0)}%)</span><span>${money(0)}</span></div>
-        <div class="sum-line total"><span>Total</span><span>${money(0)}</span></div>`;
+    const searchTerm =
+      $('#posProductSearch')
+        ?.value
+        .trim()
+        .toLowerCase() || '';
+
+    let products;
+
+    if (searchTerm) {
+      products = state.products.filter(
+        p =>
+          p.name
+            .toLowerCase()
+            .includes(searchTerm)
+      );
+    }
+    else {
+      products = state.products.filter(
+        p =>
+          p.category_id === pos.categoryId
+      );
+    }
+
+    if (products.length === 0) {
+      $('#prodGrid').innerHTML = `
+        <div class="pos-no-products">
+          <span class="pos-no-products-icon">🔎</span>
+
+          <b>No menu items found</b>
+
+          <small>
+            ${
+              searchTerm
+                ? `No results for "${searchTerm}".`
+                : 'There are no products in this category.'
+            }
+          </small>
+        </div>
+      `;
+
       return;
     }
+
+    $('#prodGrid').innerHTML =
+      products.map(p => {
+        const visual =
+          p.image_url
+            ? `
+              <img
+                src="${p.image_url}"
+                alt="${p.name}"
+                class="product-image"
+              >
+            `
+            : `
+              <span class="product-emoji">
+                ${p.image || '🍽'}
+              </span>
+            `;
+
+        return `
+          <button
+            class="product-card ${p.available ? '' : 'unavail'}"
+            data-id="${p.id}"
+            type="button"
+            ${p.available ? '' : 'aria-disabled="true"'}
+          >
+            <div class="product-visual">
+              ${visual}
+
+              ${
+                !p.available
+                  ? `
+                    <span class="product-sold-out">
+                      Sold Out
+                    </span>
+                  `
+                  : ''
+              }
+            </div>
+
+            <div class="product-details">
+              <div class="product-info">
+                <span class="name">
+                  ${p.name}
+                </span>
+
+                <span class="price">
+                  ${money(p.price)}
+                </span>
+              </div>
+
+              ${
+                p.available
+                  ? `
+                    <span
+                      class="product-add"
+                      aria-hidden="true"
+                    >
+                      +
+                    </span>
+                  `
+                  : ''
+              }
+            </div>
+          </button>
+        `;
+      }).join('');
+
+    $$('#prodGrid .product-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const p =
+          state.products.find(
+            x =>
+              x.id === +card.dataset.id
+          );
+
+        if (!p || !p.available) {
+          toast(
+            'Item not available',
+            'warn'
+          );
+
+          return;
+        }
+
+        const ex =
+          pos.cart.find(
+            x =>
+              x.productId === p.id
+          );
+
+        if (ex) {
+          ex.qty += 1;
+        }
+        else {
+          pos.cart.push({
+            productId: p.id,
+            name: p.name,
+            price: p.price,
+            qty: 1,
+          });
+        }
+
+        renderCart();
+      });
+    });
+  }
+
+  function renderCart() {
+    const totalItems = pos.cart.reduce((sum, item) => sum + item.qty, 0);
+    const cartCount = $('#cartCount');
+
+    const mobileBar =
+      $('#mobilePosBar');
+
+    const mobileCount =
+      $('#mobileCartCount');
+
+    const mobileTotal =
+      $('#mobileCartTotal');
+
+    if (cartCount) {
+      cartCount.textContent =
+        `${totalItems} item${totalItems === 1 ? '' : 's'}`;
+    }
+
+    if (pos.cart.length === 0) {
+      $('#cartItems').innerHTML = `
+        <div class="cart-empty">
+          <span class="emoji">🛒</span>
+          <b>Your cart is empty</b>
+          <small>Select a menu item to begin an order.</small>
+        </div>`;
+
+      $('#cartSum').innerHTML = `
+        <div class="sum-line">
+          <span>Subtotal</span>
+          <span>${money(0)}</span>
+        </div>
+
+        <div class="sum-line">
+          <span>Tax (${(state.meta.taxRate*100).toFixed(0)}%)</span>
+          <span>${money(0)}</span>
+        </div>
+
+        <div class="sum-line total">
+          <span>Total</span>
+          <span>${money(0)}</span>
+        </div>`;
+
+      pos._calc = {
+        sub: 0,
+        memberDisc: 0,
+        promoDisc: 0,
+        tax: 0,
+        total: 0,
+      };
+
+      const payBtn =
+        $('#payBtn');
+
+      if (payBtn) {
+        payBtn.innerHTML = `
+          <span>💳</span>
+          Proceed to Payment
+        `;
+      }
+
+      /*
+       * Hide phone sticky cart bar
+       * when cart is empty.
+       */
+      if (mobileBar) {
+        mobileBar.classList.remove(
+          'show'
+        );
+      }
+
+      if (mobileCount) {
+        mobileCount.textContent =
+          '0 items';
+      }
+
+      if (mobileTotal) {
+        mobileTotal.textContent =
+          money(0);
+      }
+
+      return;
+    }
+
     $('#cartItems').innerHTML = pos.cart.map((it,idx)=>`
       <div class="cart-item">
-        <div class="info"><b>${it.name}</b><small>${money(it.price)} × ${it.qty} = ${money(it.price*it.qty)}</small></div>
-        <div class="qty-ctrl">
-          <button data-act="dec" data-i="${idx}">−</button>
-          <span>${it.qty}</span>
-          <button data-act="inc" data-i="${idx}">+</button>
-          <button data-act="rem" data-i="${idx}" style="margin-left:4px;background:#fee2e2;color:#991b1b">×</button>
+
+        <div class="info">
+          <b>${it.name}</b>
+          <small>${money(it.price)} each</small>
+          <strong>${money(it.price*it.qty)}</strong>
         </div>
+
+        <div class="qty-ctrl">
+          <button
+            data-act="dec"
+            data-i="${idx}"
+            type="button"
+            aria-label="Decrease quantity"
+          >
+            −
+          </button>
+
+          <span>${it.qty}</span>
+
+          <button
+            data-act="inc"
+            data-i="${idx}"
+            type="button"
+            aria-label="Increase quantity"
+          >
+            +
+          </button>
+
+          <button
+            class="cart-remove"
+            data-act="rem"
+            data-i="${idx}"
+            type="button"
+            aria-label="Remove item"
+          >
+            ×
+          </button>
+        </div>
+
       </div>`).join('');
+
     $$('#cartItems button').forEach(b => b.addEventListener('click', () => {
-      const i = +b.dataset.i, act = b.dataset.act;
-      if (act==='inc') pos.cart[i].qty += 1;
-      else if (act==='dec') { if (pos.cart[i].qty>1) pos.cart[i].qty -= 1; }
-      else if (act==='rem') pos.cart.splice(i,1);
+      const i = +b.dataset.i;
+      const act = b.dataset.act;
+
+      if (act === 'inc') {
+        pos.cart[i].qty += 1;
+      }
+
+      else if (act === 'dec') {
+        if (pos.cart[i].qty > 1) {
+          pos.cart[i].qty -= 1;
+        }
+      }
+
+      else if (act === 'rem') {
+        pos.cart.splice(i, 1);
+      }
+
       renderCart();
     }));
-    const sub = pos.cart.reduce((s,x) => s + x.price * x.qty, 0);
-    const customer = state.customers.find(c => c.id === pos.customerId);
-    const tier = state.membershipTiers.find(t => t.name === customer.membership);
-    const memberDisc = tier ? sub * tier.discount : 0;
-    const promoDisc = computePromoDiscount(sub);
-    const totalDisc = memberDisc + promoDisc;
-    const taxBase = Math.max(0, sub - totalDisc);
-    const tax = taxBase * state.meta.taxRate;
-    const total = taxBase + tax;
-    pos._calc = { sub, memberDisc, promoDisc, tax, total };
+
+    const sub =
+      pos.cart.reduce(
+        (s,x) => s + x.price * x.qty,
+        0
+      );
+
+    const customer =
+      state.customers.find(
+        c => c.id === pos.customerId
+      );
+
+    const tier =
+      state.membershipTiers.find(
+        t => t.name === customer?.membership
+      );
+
+    const memberDisc =
+      tier
+        ? sub * tier.discount
+        : 0;
+
+    const promoDisc =
+      computePromoDiscount(sub);
+
+    const totalDisc =
+      memberDisc + promoDisc;
+
+    const taxBase =
+      Math.max(
+        0,
+        sub - totalDisc
+      );
+
+    const tax =
+      taxBase * state.meta.taxRate;
+
+    const total =
+      taxBase + tax;
+
+    pos._calc = {
+      sub,
+      memberDisc,
+      promoDisc,
+      tax,
+      total
+    };
 
     $('#cartSum').innerHTML = `
-      <div class="sum-line"><span>Subtotal</span><span>${money(sub)}</span></div>
-      ${memberDisc>0?`<div class="sum-line" style="color:#059669"><span>Member discount (${(tier.discount*100).toFixed(0)}%)</span><span>−${money(memberDisc)}</span></div>`:''}
-      ${promoDisc>0?`<div class="sum-line" style="color:#059669"><span>Promo (${pos.promoCode})</span><span>−${money(promoDisc)}</span></div>`:''}
-      <div class="sum-line"><span>Tax (${(state.meta.taxRate*100).toFixed(0)}%)</span><span>${money(tax)}</span></div>
-      <div class="sum-line total"><span>Total</span><span>${money(total)}</span></div>`;
+      <div class="sum-line">
+        <span>Subtotal</span>
+        <span>${money(sub)}</span>
+      </div>
+
+      ${
+        memberDisc > 0
+          ? `
+            <div class="sum-line discount-line">
+              <span>
+                Member discount
+                (${(tier.discount*100).toFixed(0)}%)
+              </span>
+
+              <span>
+                −${money(memberDisc)}
+              </span>
+            </div>
+          `
+          : ''
+      }
+
+      ${
+        promoDisc > 0
+          ? `
+            <div class="sum-line discount-line">
+              <span>
+                Promo (${pos.promoCode})
+              </span>
+
+              <span>
+                −${money(promoDisc)}
+              </span>
+            </div>
+          `
+          : ''
+      }
+
+      <div class="sum-line">
+        <span>
+          Tax
+          (${(state.meta.taxRate*100).toFixed(0)}%)
+        </span>
+
+        <span>
+          ${money(tax)}
+        </span>
+      </div>
+
+      <div class="sum-line total">
+        <span>Total</span>
+        <span>${money(total)}</span>
+      </div>
+    `;
+
+    const payBtn =
+      $('#payBtn');
+
+    if (payBtn) {
+      payBtn.innerHTML = `
+        <span>💳</span>
+        Pay ${money(total)}
+      `;
+    }
+
+    /*
+     * Update mobile sticky cart bar.
+     */
+    if (mobileCount) {
+      mobileCount.textContent =
+        `${totalItems} item${totalItems === 1 ? '' : 's'}`;
+    }
+
+    if (mobileTotal) {
+      mobileTotal.textContent =
+        money(total);
+    }
+
+    if (mobileBar) {
+      mobileBar.classList.add(
+        'show'
+      );
+    }
   }
+
   function computePromoDiscount(sub) {
-    if (!pos.promoCode) return 0;
-    const promo = state.promotions.find(p => p.code === pos.promoCode && p.active);
-    if (!promo) return 0;
-    if (sub < num(promo.min_order)) return 0;
-    if (promo.type === 'percent') return r2(sub * num(promo.value) / 100);
+    if (!pos.promoCode) {
+      return 0;
+    }
+
+    const promo =
+      state.promotions.find(
+        p =>
+          p.code === pos.promoCode &&
+          p.active
+      );
+
+    if (!promo) {
+      return 0;
+    }
+
+    if (sub < num(promo.min_order)) {
+      return 0;
+    }
+
+    if (promo.type === 'percent') {
+      return r2(
+        sub * num(promo.value) / 100
+      );
+    }
+
     return num(promo.value);
   }
 
   function openPayModal() {
-    if (pos.cart.length === 0) { toast('Cart is empty', 'warn'); return; }
-    const total = pos._calc.total;
+    if (pos.cart.length === 0) {
+      toast(
+        'Cart is empty',
+        'warn'
+      );
+
+      return;
+    }
+
+    const total =
+      pos._calc.total;
+
     openModal(`
       <div class="modal-head">
-        <h3>💳 Process Payment — ${money(total)}</h3>
-        <button class="close-btn" onclick="closeModal()">×</button>
+        <h3>
+          💳 Process Payment —
+          ${money(total)}
+        </h3>
+
+        <button
+          class="close-btn"
+          onclick="closeModal()"
+        >
+          ×
+        </button>
       </div>
+
       <div class="modal-body">
-        <div class="alert alert-info" style="margin-bottom:12px">Customer: <b>${state.customers.find(c=>c.id===pos.customerId).name}</b> · Channel: <b>${pos.channel.toUpperCase()}</b></div>
-        <div class="section-title">Promo Code (Optional)</div>
+
+        <div
+          class="alert alert-info"
+          style="margin-bottom:12px"
+        >
+          Customer:
+          <b>
+            ${
+              state.customers.find(
+                c => c.id === pos.customerId
+              ).name
+            }
+          </b>
+
+          · Channel:
+          <b>
+            ${pos.channel.toUpperCase()}
+          </b>
+        </div>
+
+        <div class="section-title">
+          Promo Code (Optional)
+        </div>
+
         <div class="flex gap-2 mb-4">
-          <input type="text" id="promoIn" placeholder="Enter code e.g. WELCOME10" class="search" style="flex:1" value="${pos.promoCode||''}">
-          <button class="btn" id="applyPromo">Apply</button>
-          ${pos.promoCode?`<button class="btn danger" id="removePromo">Remove</button>`:''}
+
+          <input
+            type="text"
+            id="promoIn"
+            placeholder="Enter code e.g. WELCOME10"
+            class="search"
+            style="flex:1"
+            value="${pos.promoCode || ''}"
+          >
+
+          <button
+            class="btn"
+            id="applyPromo"
+          >
+            Apply
+          </button>
+
+          ${
+            pos.promoCode
+              ? `
+                <button
+                  class="btn danger"
+                  id="removePromo"
+                >
+                  Remove
+                </button>
+              `
+              : ''
+          }
+
         </div>
-        <div class="section-title">Payment Method</div>
+
+        <div class="section-title">
+          Payment Method
+        </div>
+
         <div class="payment-grid">
-          <div class="pay-option active" data-m="cash"><span class="ico">💵</span><span class="label">Cash</span></div>
-          <div class="pay-option" data-m="card"><span class="ico">💳</span><span class="label">Card</span></div>
-          <div class="pay-option" data-m="ewallet"><span class="ico">📱</span><span class="label">E-Wallet</span></div>
-          <div class="pay-option" data-m="qr"><span class="ico">📷</span><span class="label">QR Pay</span></div>
+
+          <div
+            class="pay-option active"
+            data-m="cash"
+          >
+            <span class="ico">💵</span>
+            <span class="label">Cash</span>
+          </div>
+
+          <div
+            class="pay-option"
+            data-m="card"
+          >
+            <span class="ico">💳</span>
+            <span class="label">Card</span>
+          </div>
+
+          <div
+            class="pay-option"
+            data-m="ewallet"
+          >
+            <span class="ico">📱</span>
+            <span class="label">E-Wallet</span>
+          </div>
+
+          <div
+            class="pay-option"
+            data-m="qr"
+          >
+            <span class="ico">📷</span>
+            <span class="label">QR Pay</span>
+          </div>
+
         </div>
+
         <div id="cashSection">
-          <div class="section-title">Amount Received</div>
-          <input type="number" id="amtRcv" class="search" style="font-size:18px;padding:14px" value="${total.toFixed(2)}" step="0.01">
-          <div class="alert alert-info mt-3" style="font-size:15px">Change: <b id="changeAmt">${state.meta.currency} 0.00</b></div>
+
+          <div class="section-title">
+            Amount Received
+          </div>
+
+          <input
+            type="number"
+            id="amtRcv"
+            class="search"
+            style="font-size:18px;padding:14px"
+            value="${total.toFixed(2)}"
+            step="0.01"
+          >
+
+          <div
+            class="alert alert-info mt-3"
+            style="font-size:15px"
+          >
+            Change:
+            <b id="changeAmt">
+              ${state.meta.currency} 0.00
+            </b>
+          </div>
+
         </div>
+
       </div>
+
       <div class="modal-foot">
-        <button class="btn" onclick="closeModal()">Cancel</button>
-        <button class="btn primary lg" id="confirmPay">✓ Complete Sale</button>
-      </div>`, {size:'lg'});
+
+        <button
+          class="btn"
+          onclick="closeModal()"
+        >
+          Cancel
+        </button>
+
+        <button
+          class="btn primary lg"
+          id="confirmPay"
+        >
+          ✓ Complete Sale
+        </button>
+
+      </div>
+    `, {
+      size:'lg'
+    });
 
     let method = 'cash';
-    $$('.pay-option').forEach(o => o.addEventListener('click', () => {
-      $$('.pay-option').forEach(x => x.classList.remove('active'));
-      o.classList.add('active');
-      method = o.dataset.m;
-      $('#cashSection').style.display = method==='cash' ? 'block' : 'none';
-    }));
-    $('#amtRcv').addEventListener('input', e => {
-      const change = +e.target.value - total;
-      $('#changeAmt').textContent = state.meta.currency + ' ' + Math.max(0,change).toFixed(2);
-    });
-    $('#applyPromo').addEventListener('click', async () => {
-      const code = $('#promoIn').value.trim().toUpperCase();
-      if (!code) return;
-      try {
-        const sub = pos.cart.reduce((s,x)=>s+x.price*x.qty, 0);
-        const r = await API.post('/promotions/validate', { code, subtotal: sub });
-        pos.promoCode = code;
-        toast(r.message, 'success');
-        closeModal(); renderCart(); setTimeout(openPayModal, 80);
-      } catch (err) {
-        toast(err.payload?.message || 'Invalid promo', 'error');
+
+    $$('.pay-option').forEach(
+      o => o.addEventListener(
+        'click',
+        () => {
+          $$('.pay-option').forEach(
+            x => x.classList.remove(
+              'active'
+            )
+          );
+
+          o.classList.add(
+            'active'
+          );
+
+          method =
+            o.dataset.m;
+
+          $('#cashSection').style.display =
+            method === 'cash'
+              ? 'block'
+              : 'none';
+        }
+      )
+    );
+
+    $('#amtRcv').addEventListener(
+      'input',
+      e => {
+        const change =
+          +e.target.value -
+          total;
+
+        $('#changeAmt').textContent =
+          state.meta.currency +
+          ' ' +
+          Math.max(
+            0,
+            change
+          ).toFixed(2);
       }
-    });
-    if ($('#removePromo')) $('#removePromo').addEventListener('click', () => {
-      pos.promoCode = null; closeModal(); renderCart(); setTimeout(openPayModal, 80);
-    });
-    $('#confirmPay').addEventListener('click', async () => {
-      if (method==='cash') {
-        const amt = +$('#amtRcv').value;
-        if (amt < total) { toast('Insufficient amount', 'error'); return; }
+    );
+
+    $('#applyPromo').addEventListener(
+      'click',
+      async () => {
+        const code =
+          $('#promoIn')
+            .value
+            .trim()
+            .toUpperCase();
+
+        if (!code) {
+          return;
+        }
+
+        try {
+          const sub =
+            pos.cart.reduce(
+              (s,x) =>
+                s +
+                x.price *
+                x.qty,
+              0
+            );
+
+          const r =
+            await API.post(
+              '/promotions/validate',
+              {
+                code,
+                subtotal: sub
+              }
+            );
+
+          pos.promoCode =
+            code;
+
+          toast(
+            r.message,
+            'success'
+          );
+
+          closeModal();
+
+          renderCart();
+
+          setTimeout(
+            openPayModal,
+            80
+          );
+        }
+        catch (err) {
+          toast(
+            err.payload?.message ||
+            'Invalid promo',
+            'error'
+          );
+        }
       }
-      await completeSale(method);
-    });
+    );
+
+    if ($('#removePromo')) {
+      $('#removePromo').addEventListener(
+        'click',
+        () => {
+          pos.promoCode =
+            null;
+
+          closeModal();
+
+          renderCart();
+
+          setTimeout(
+            openPayModal,
+            80
+          );
+        }
+      );
+    }
+
+    $('#confirmPay').addEventListener(
+      'click',
+      async () => {
+
+        if (method === 'cash') {
+          const amt =
+            +$('#amtRcv').value;
+
+          if (amt < total) {
+            toast(
+              'Insufficient amount',
+              'error'
+            );
+
+            return;
+          }
+        }
+
+        await completeSale(
+          method
+        );
+      }
+    );
   }
 
   async function completeSale(method) {
-    const btn = $('#confirmPay');
-    btn.disabled = true; btn.textContent = 'Processing...';
+    const btn =
+      $('#confirmPay');
+
+    btn.disabled =
+      true;
+
+    btn.textContent =
+      'Processing...';
+
     try {
-      const order = await API.post('/orders', {
-        items: pos.cart.map(c => ({ product_id: c.productId, qty: c.qty })),
-        customer_id: pos.customerId,
-        channel: pos.channel,
-        table_id: pos.tableId,
-        promo_code: pos.promoCode,
-        payment: { method },
-      });
+      const order =
+        await API.post(
+          '/orders',
+          {
+            items:
+              pos.cart.map(
+                c => ({
+                  product_id:
+                    c.productId,
+
+                  qty:
+                    c.qty
+                })
+              ),
+
+            customer_id:
+              pos.customerId,
+
+            channel:
+              pos.channel,
+
+            table_id:
+              pos.tableId,
+
+            promo_code:
+              pos.promoCode,
+
+            payment: {
+              method
+            },
+          }
+        );
+
       closeModal();
-      showReceipt(order, method);
-      pos.cart = []; pos.promoCode = null; pos.tableId = null;
-      // Refresh customers in case loyalty tier changed
-      state.customers = await API.get('/customers');
-    } catch (err) {
-      btn.disabled = false; btn.textContent = '✓ Complete Sale';
-      toast(err.payload?.message || err.message || 'Sale failed', 'error');
+
+      showReceipt(
+        order,
+        method
+      );
+
+      pos.cart = [];
+      pos.promoCode = null;
+      pos.tableId = null;
+
+      state.customers =
+        await API.get(
+          '/customers'
+        );
+    }
+    catch (err) {
+      btn.disabled =
+        false;
+
+      btn.textContent =
+        '✓ Complete Sale';
+
+      toast(
+        err.payload?.message ||
+        err.message ||
+        'Sale failed',
+        'error'
+      );
     }
   }
 
   function showReceipt(order, method) {
-    const customer = state.customers.find(c => c.id === order.customer_id) || { name: order.customer_name };
-    const html = `<div class="receipt" id="receipt">
-      <div class="center"><h4>${state.meta.cafeName}</h4>
-        <div style="font-size:11px">${state.meta.tagline}</div>
-        <div style="font-size:11px">${state.meta.address}</div>
-        <div style="font-size:11px">Tel: ${state.meta.phone}</div>
+    const customer =
+      state.customers.find(
+        c =>
+          c.id ===
+          order.customer_id
+      ) || {
+        name:
+          order.customer_name
+      };
+
+    const html = `
+      <div
+        class="receipt"
+        id="receipt"
+      >
+
+        <div class="center">
+
+          <h4>
+            ${state.meta.cafeName}
+          </h4>
+
+          <div style="font-size:11px">
+            ${state.meta.tagline}
+          </div>
+
+          <div style="font-size:11px">
+            ${state.meta.address}
+          </div>
+
+          <div style="font-size:11px">
+            Tel: ${state.meta.phone}
+          </div>
+
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="row">
+          <span>Order:</span>
+          <b>${order.order_no}</b>
+        </div>
+
+        <div class="row">
+          <span>Date:</span>
+          <span>
+            ${fmtDate(order.created_at)}
+          </span>
+        </div>
+
+        <div class="row">
+          <span>Cashier:</span>
+          <span>
+            ${currentUser.name}
+          </span>
+        </div>
+
+        <div class="row">
+          <span>Channel:</span>
+          <span>
+            ${order.channel.toUpperCase()}
+          </span>
+        </div>
+
+        ${
+          order.table_id
+            ? `
+              <div class="row">
+                <span>Table:</span>
+
+                <span>
+                  ${
+                    state.tables.find(
+                      t =>
+                        t.id ===
+                        order.table_id
+                    )?.name || ''
+                  }
+                </span>
+              </div>
+            `
+            : ''
+        }
+
+        <div class="row">
+          <span>Customer:</span>
+          <span>
+            ${customer.name}
+          </span>
+        </div>
+
+        <div class="sep"></div>
+
+        ${
+          order.items.map(
+            it => `
+              <div>
+
+                <div class="item-row">
+                  <b>
+                    ${it.name}
+                  </b>
+
+                  <span></span>
+                </div>
+
+                <div class="item-row">
+
+                  <span>
+                    ${it.qty}
+                    x
+                    ${state.meta.currency}
+                    ${num(it.price).toFixed(2)}
+                  </span>
+
+                  <span>
+                    ${state.meta.currency}
+                    ${
+                      (
+                        it.qty *
+                        num(it.price)
+                      ).toFixed(2)
+                    }
+                  </span>
+
+                </div>
+
+              </div>
+            `
+          ).join('')
+        }
+
+        <div class="sep"></div>
+
+        <div class="row">
+          <span>Subtotal</span>
+
+          <span>
+            ${state.meta.currency}
+            ${num(order.subtotal).toFixed(2)}
+          </span>
+        </div>
+
+        ${
+          num(order.discount) > 0
+            ? `
+              <div class="row">
+
+                <span>
+                  Discount
+                </span>
+
+                <span>
+                  -
+                  ${state.meta.currency}
+                  ${num(order.discount).toFixed(2)}
+                </span>
+
+              </div>
+            `
+            : ''
+        }
+
+        <div class="row">
+          <span>
+            Tax
+            (${(state.meta.taxRate*100).toFixed(0)}%)
+          </span>
+
+          <span>
+            ${state.meta.currency}
+            ${num(order.tax).toFixed(2)}
+          </span>
+        </div>
+
+        <div class="row">
+          <b>TOTAL</b>
+
+          <b>
+            ${state.meta.currency}
+            ${num(order.total).toFixed(2)}
+          </b>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="row">
+          <span>Paid by:</span>
+
+          <span>
+            ${method.toUpperCase()}
+          </span>
+        </div>
+
+        <div class="sep"></div>
+
+        <div
+          class="center"
+          style="font-size:11px"
+        >
+          Thank you! Stay healthy 🌿
+        </div>
+
       </div>
-      <div class="sep"></div>
-      <div class="row"><span>Order:</span><b>${order.order_no}</b></div>
-      <div class="row"><span>Date:</span><span>${fmtDate(order.created_at)}</span></div>
-      <div class="row"><span>Cashier:</span><span>${currentUser.name}</span></div>
-      <div class="row"><span>Channel:</span><span>${order.channel.toUpperCase()}</span></div>
-      ${order.table_id?`<div class="row"><span>Table:</span><span>${state.tables.find(t=>t.id===order.table_id)?.name||''}</span></div>`:''}
-      <div class="row"><span>Customer:</span><span>${customer.name}</span></div>
-      <div class="sep"></div>
-      ${order.items.map(it=>`<div>
-        <div class="item-row"><b>${it.name}</b><span></span></div>
-        <div class="item-row"><span>  ${it.qty} x ${state.meta.currency}${num(it.price).toFixed(2)}</span><span>${state.meta.currency}${(it.qty*num(it.price)).toFixed(2)}</span></div>
-      </div>`).join('')}
-      <div class="sep"></div>
-      <div class="row"><span>Subtotal</span><span>${state.meta.currency}${num(order.subtotal).toFixed(2)}</span></div>
-      ${num(order.discount)>0?`<div class="row"><span>Discount</span><span>-${state.meta.currency}${num(order.discount).toFixed(2)}</span></div>`:''}
-      <div class="row"><span>Tax (${(state.meta.taxRate*100).toFixed(0)}%)</span><span>${state.meta.currency}${num(order.tax).toFixed(2)}</span></div>
-      <div class="row"><b>TOTAL</b><b>${state.meta.currency}${num(order.total).toFixed(2)}</b></div>
-      <div class="sep"></div>
-      <div class="row"><span>Paid by:</span><span>${method.toUpperCase()}</span></div>
-      <div class="sep"></div>
-      <div class="center" style="font-size:11px">Thank you! Stay healthy 🌿</div>
-    </div>`;
+    `;
+
     openModal(`
-      <div class="modal-head"><h3>🧾 Receipt — ${order.order_no}</h3>
-        <button class="close-btn" onclick="closeModal()">×</button></div>
-      <div class="modal-body">${html}</div>
+      <div class="modal-head">
+
+        <h3>
+          🧾 Receipt —
+          ${order.order_no}
+        </h3>
+
+        <button
+          class="close-btn"
+          onclick="closeModal()"
+        >
+          ×
+        </button>
+
+      </div>
+
+      <div class="modal-body">
+        ${html}
+      </div>
+
       <div class="modal-foot">
-        <button class="btn" onclick="window.print()">🖨 Print</button>
-        <button class="btn primary" onclick="closeModal();app.route('pos')">New Sale</button>
-      </div>`);
+
+        <button
+          class="btn"
+          onclick="window.print()"
+        >
+          🖨 Print
+        </button>
+
+        <button
+          class="btn primary"
+          onclick="closeModal();app.route('pos')"
+        >
+          New Sale
+        </button>
+
+      </div>
+    `);
   }
 };
 
