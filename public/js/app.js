@@ -144,6 +144,46 @@ const PERM_MAP = {
   reports:'reports', users:'users', audit:'audit',
 };
 
+const THEME_MAP = {
+  /*
+   * Pillar 01
+   * Customer Experience
+   */
+  pos: 'p1',
+  orders: 'p1',
+  customer: 'p1',
+  promo: 'p1',
+  refund: 'p1',
+
+  /*
+   * Pillar 02
+   * Core Operations
+   */
+  kds: 'p2',
+  menu: 'p2',
+  tables: 'p2',
+  inventory: 'p2',
+  purchase: 'p2',
+
+  /*
+   * Pillar 03
+   * Business Intelligence / Administration
+   */
+  dashboard: 'p3',
+  reports: 'p3',
+  users: 'p3',
+  audit: 'p3',
+};
+
+
+function applyRouteTheme(routeKey) {
+  const theme =
+    THEME_MAP[routeKey] || 'p1';
+
+  document.body.dataset.theme =
+    theme;
+}
+
 function renderNav() {
   const list = $('#navList');
   list.innerHTML = NAV.map(item => {
@@ -182,10 +222,19 @@ const PAGE_META = {
 };
 
 function route(key) {
-  if (PERM_MAP[key] && !hasPermission(PERM_MAP[key])) {
-    toast("You don't have permission for this module.", 'error');
-    return;
-  }
+    if (
+      PERM_MAP[key] &&
+      !hasPermission(PERM_MAP[key])
+    ) {
+      toast(
+        "You don't have permission for this module.",
+        'error'
+      );
+
+      return;
+    }
+
+    applyRouteTheme(key);
   // Stop background polling on the previous view
   if (currentRoute === 'kds'    && key !== 'kds')    clearKdsTimers();
   if (currentRoute === 'orders' && key !== 'orders') clearOrdersTimers();
