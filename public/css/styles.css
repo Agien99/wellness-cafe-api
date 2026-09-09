@@ -5,18 +5,19 @@
 
 :root{
   /* ==========================================
-     WELLNESS CAFE BRAND
-     Client design: warm terracotta / burnt orange
+     SHARED SYSTEM COLOURS
   ========================================== */
 
-  --primary:#C7603F;
-  --primary-dark:#A94B30;
-  --primary-light:#F8E8E1;
-  --primary-soft:#FFF5F1;
+  --bg:#f6f7f6;
+  --surface:#ffffff;
+  --surface-alt:#f9fafb;
 
-  /* Secondary / warning */
-  --accent:#D99A2B;
-  --accent-dark:#B87917;
+  --border:#e5e7eb;
+  --border-strong:#d1d5db;
+
+  --text:#1f2937;
+  --text-soft:#6b7280;
+  --text-muted:#9ca3af;
 
   /* Semantic colours */
   --success:#10b981;
@@ -29,27 +30,70 @@
   --warn:#f97316;
   --info:#3b82f6;
 
-  /* Surfaces */
-  --bg:#F7F5F3;
-  --surface:#ffffff;
-  --surface-alt:#FAF8F7;
+  /* Existing secondary accent */
+  --accent:#f59e0b;
+  --accent-dark:#d97706;
 
-  /* Borders */
-  --border:#E8E1DE;
-  --border-strong:#D8CDC8;
 
-  /* Typography */
-  --text:#292524;
-  --text-soft:#78716C;
-  --text-muted:#A8A29E;
+  /* ==========================================
+     PILLAR 01
+     Customer Experience
+     POS / Orders / Customers / Promo / Refund
+  ========================================== */
 
-  /* Sidebar */
-  --sidebar-bg:#4A2B24;
-  --sidebar-bg-2:#5B3027;
-  --sidebar-text:#F5DDD4;
-  --sidebar-active:#C7603F;
+  --p1-primary:#C7603F;
+  --p1-dark:#A94B30;
+  --p1-light:#F8E8E1;
 
-  /* Effects */
+  --p1-sidebar:#5A3027;
+  --p1-sidebar-2:#45251F;
+  --p1-sidebar-text:#F7E5DE;
+
+
+  /* ==========================================
+     PILLAR 02
+     Core Operations
+     Kitchen / Inventory / Products / Purchase
+  ========================================== */
+
+  --p2-primary:#27688E;
+  --p2-dark:#184B68;
+  --p2-light:#E4F0F6;
+
+  --p2-sidebar:#173F57;
+  --p2-sidebar-2:#102F42;
+  --p2-sidebar-text:#DCECF5;
+
+
+  /* ==========================================
+     PILLAR 03
+     Business Intelligence / Administration
+     Dashboard / Reports / Users / Audit
+  ========================================== */
+
+  --p3-primary:#BF921D;
+  --p3-dark:#927015;
+  --p3-light:#F7EFD8;
+
+  --p3-sidebar:#51421C;
+  --p3-sidebar-2:#3E3216;
+  --p3-sidebar-text:#F6EDD1;
+
+
+  /* ==========================================
+     DEFAULT THEME
+     Used before a route is selected
+  ========================================== */
+
+  --primary:var(--p1-primary);
+  --primary-dark:var(--p1-dark);
+  --primary-light:var(--p1-light);
+
+  --sidebar-bg:var(--p1-sidebar);
+  --sidebar-bg-2:var(--p1-sidebar-2);
+  --sidebar-text:var(--p1-sidebar-text);
+  --sidebar-active:var(--p1-primary);
+
   --shadow:
     0 1px 3px rgba(0,0,0,.08),
     0 1px 2px rgba(0,0,0,.04);
@@ -60,6 +104,54 @@
 
   --radius:10px;
   --radius-lg:14px;
+}
+
+
+/* ==========================================
+   ROUTE THEME — PILLAR 01
+========================================== */
+
+body[data-theme="p1"]{
+  --primary:var(--p1-primary);
+  --primary-dark:var(--p1-dark);
+  --primary-light:var(--p1-light);
+
+  --sidebar-bg:var(--p1-sidebar);
+  --sidebar-bg-2:var(--p1-sidebar-2);
+  --sidebar-text:var(--p1-sidebar-text);
+  --sidebar-active:var(--p1-primary);
+}
+
+
+/* ==========================================
+   ROUTE THEME — PILLAR 02
+========================================== */
+
+body[data-theme="p2"]{
+  --primary:var(--p2-primary);
+  --primary-dark:var(--p2-dark);
+  --primary-light:var(--p2-light);
+
+  --sidebar-bg:var(--p2-sidebar);
+  --sidebar-bg-2:var(--p2-sidebar-2);
+  --sidebar-text:var(--p2-sidebar-text);
+  --sidebar-active:var(--p2-primary);
+}
+
+
+/* ==========================================
+   ROUTE THEME — PILLAR 03
+========================================== */
+
+body[data-theme="p3"]{
+  --primary:var(--p3-primary);
+  --primary-dark:var(--p3-dark);
+  --primary-light:var(--p3-light);
+
+  --sidebar-bg:var(--p3-sidebar);
+  --sidebar-bg-2:var(--p3-sidebar-2);
+  --sidebar-text:var(--p3-sidebar-text);
+  --sidebar-active:var(--p3-primary);
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -107,10 +199,16 @@ input,select,textarea{font-family:inherit;font-size:14px}
   width:100%;padding:11px 13px;border:1.5px solid var(--border);
   border-radius:var(--radius);background:#fff;transition:.15s;
 }
-.field input:focus,.field select:focus,.field textarea:focus{
+.field input:focus,
+.field select:focus,
+.field textarea:focus{
   outline:none;
   border-color:var(--primary);
-  box-shadow:0 0 0 3px rgba(199,96,63,.14);
+  box-shadow:0 0 0 3px color-mix(
+    in srgb,
+    var(--primary) 15%,
+    transparent
+  );
 }
 .btn-primary{
   width:100%;padding:12px;background:var(--primary);color:#fff;
@@ -131,14 +229,22 @@ input,select,textarea{font-family:inherit;font-size:14px}
 }
 .brand-row{display:flex;align-items:center;gap:10px;padding:6px 8px 18px}
 .brand-row .icon{
-  width:42px;height:42px;border-radius:50%;
+  width:42px;
+  height:42px;
+  border-radius:50%;
+
   background:
     linear-gradient(
       135deg,
-      #D97958,
-      var(--primary)
+      var(--primary),
+      var(--primary-dark)
     );
-  display:flex;align-items:center;justify-content:center;font-size:22px;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-size:22px;
 }
 .brand-row .text{font-weight:700;font-size:15px;color:#fff;line-height:1.1}
 .brand-row .text small{display:block;font-weight:400;font-size:10.5px;color:#E9C4B6;margin-top:2px}
@@ -662,13 +768,15 @@ table.data tr:hover{background:#f9fafb}
 
 .pos-product-search:focus{
   background:#fff;
-
-  border-color:
-    var(--primary);
+  border-color:var(--primary);
 
   box-shadow:
     0 0 0 3px
-    rgba(199,96,63,.11);
+    color-mix(
+      in srgb,
+      var(--primary) 12%,
+      transparent
+    );
 }
 
 .pos-product-search::-webkit-search-cancel-button{
@@ -800,9 +908,14 @@ table.data tr:hover{background:#f9fafb}
   background:var(--primary);
   border-color:var(--primary);
   color:#fff;
+
   box-shadow:
     0 5px 14px
-    rgba(199,96,63,.22);
+    color-mix(
+      in srgb,
+      var(--primary) 24%,
+      transparent
+    );
 }
 
 .cat-icon{
@@ -957,7 +1070,11 @@ table.data tr:hover{background:#f9fafb}
   line-height:1;
   box-shadow:
     0 4px 10px
-    rgba(199,96,63,.24);
+    color-mix(
+      in srgb,
+      var(--primary) 25%,
+      transparent
+    );
 }
 
 
@@ -1056,9 +1173,14 @@ table.data tr:hover{background:#f9fafb}
 .pos-field select:focus,
 .pos-field input:focus{
   border-color:var(--primary);
+
   box-shadow:
     0 0 0 3px
-    rgba(199,96,63,.11);
+    color-mix(
+      in srgb,
+      var(--primary) 12%,
+      transparent
+    );
 }
 
 .pos-meta-grid{
@@ -1622,7 +1744,11 @@ table.data tr:hover{background:#f9fafb}
 
     box-shadow:
       0 5px 14px
-      rgba(199,96,63,.28);
+      color-mix(
+        in srgb,
+        var(--primary) 28%,
+        transparent
+      );
   }
 
   .pos-mobile-pay:active{
