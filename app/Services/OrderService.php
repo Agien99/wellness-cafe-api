@@ -10,6 +10,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\Promotion;
+use App\Models\PromotionUsage;
 use App\Models\StockMovement;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -18,290 +19,892 @@ use Illuminate\Validation\ValidationException;
 /**
  * OrderService
  * ------------
- * Central business logic for creating an order end-to-end:
- *   - validate items
- *   - calculate subtotal, member discount, promo discount, tax, total
- *   - persist Order + OrderItems + Payment in a single transaction
- *   - deduct inventory via product recipe + log stock movements
- *   - award loyalty points (with tier multiplier) and auto-upgrade membership
- *   - write audit log entries
+ * Central business logic for:
+ * - order creation
+ * - discounts
+ * - Promotion V2 validation/redemption
+ * - payment
+ * - inventory
+ * - loyalty
+ * - refunds
+ * - audit logging
  */
 class OrderService
 {
     public function __construct(
-        private readonly float $taxRate = 0.06   // 6% SST
+        private readonly float $taxRate = 0.06
     ) {}
 
     /**
      * Create a new order.
      *
-     * $payload structure:
-     *   items:        [{product_id, qty}, ...]   (required, >=1)
-     *   customer_id:  int|null     defaults to walk-in (id=8)
-     *   channel:      pos|qr|online
-     *   table_id:     int|null
-     *   promo_code:   string|null
-     *   payment:      { method: cash|card|ewallet|qr }   (optional, default cash; for QR orders may be null = pending_payment)
-     *   notes:        string|null
-     *   cashier:      User|null    the staff user creating the order
+     * $payload:
+     * items        [{product_id, qty}, ...]
+     * customer_id int|null
+     * channel     pos|qr|online
+     * table_id    int|null
+     * promo_code  string|null
+     * payment     {method: cash|card|ewallet|qr}|null
+     * notes       string|null
+     * cashier     User|null
      */
     public function create(array $payload): Order
     {
         $items = $payload['items'] ?? [];
+
         if (count($items) === 0) {
-            throw ValidationException::withMessages(['items' => ['Order must contain at least one item.']]);
+            throw ValidationException::withMessages([
+                'items' => [
+                    'Order must contain at least one item.',
+                ],
+            ]);
         }
 
-        $customer = Customer::find($payload['customer_id'] ?? 8) ?? Customer::find(8);
-        $channel  = $payload['channel'] ?? 'pos';
-        $cashier  = $payload['cashier'] ?? null;
-        $payment  = $payload['payment'] ?? null;
-        $promoCode = $payload['promo_code'] ?? null;
+        $customer = Customer::find(
+            $payload['customer_id'] ?? 8
+        ) ?? Customer::find(8);
 
-        // Resolve products and build line items
+        if (!$customer) {
+            throw ValidationException::withMessages([
+                'customer' => [
+                    'Walk-in customer record is missing.',
+                ],
+            ]);
+        }
+
+        $channel = $payload['channel'] ?? 'pos';
+        $cashier = $payload['cashier'] ?? null;
+        $payment = $payload['payment'] ?? null;
+
+        $promoCode = isset($payload['promo_code'])
+            ? strtoupper(trim($payload['promo_code']))
+            : null;
+
+        if ($promoCode === '') {
+            $promoCode = null;
+        }
+
+        /*
+         * Resolve products before transaction.
+         */
         $resolved = [];
         $subtotal = 0;
+
         foreach ($items as $line) {
-            $product = Product::find($line['product_id'] ?? null);
+            $productId = $line['product_id'] ?? null;
+
+            $product = Product::find($productId);
+
             if (!$product) {
-                throw ValidationException::withMessages(['items' => ["Product #{$line['product_id']} not found."]]);
+                throw ValidationException::withMessages([
+                    'items' => [
+                        "Product #{$productId} not found.",
+                    ],
+                ]);
             }
+
             if (!$product->available) {
-                throw ValidationException::withMessages(['items' => ["Product '{$product->name}' is unavailable."]]);
+                throw ValidationException::withMessages([
+                    'items' => [
+                        "Product '{$product->name}' is unavailable.",
+                    ],
+                ]);
             }
-            $qty = max(1, (int) ($line['qty'] ?? 1));
+
+            $qty = max(
+                1,
+                (int) ($line['qty'] ?? 1)
+            );
+
             $resolved[] = [
                 'product' => $product,
-                'qty'     => $qty,
-                'price'   => (float) $product->price,
+                'qty' => $qty,
+                'price' => (float) $product->price,
             ];
-            $subtotal += (float) $product->price * $qty;
+
+            $subtotal +=
+                (float) $product->price * $qty;
         }
 
-        // Discounts
-        $memberDisc = round($subtotal * $customer->membership_discount, 2);
-        $promoDisc = 0;
-        if ($promoCode) {
-            $promo = Promotion::where('code', strtoupper($promoCode))->first();
-            if ($promo) {
-                $promoDisc = $promo->discountFor($subtotal);
-            }
-        }
-        $totalDiscount = round($memberDisc + $promoDisc, 2);
-        $taxBase = max(0, $subtotal - $totalDiscount);
-        $tax = round($taxBase * $this->taxRate, 2);
-        $total = round($taxBase + $tax, 2);
+        $subtotal = round($subtotal, 2);
 
-        // Persist atomically
+        /*
+         * Membership discount remains existing behaviour
+         * until Dynamic Loyalty is implemented.
+         */
+        $memberDiscount = round(
+            $subtotal * $customer->membership_discount,
+            2
+        );
+
         $order = DB::transaction(function () use (
-            $payload, $resolved, $customer, $channel, $cashier, $payment,
-            $promoCode, $subtotal, $totalDiscount, $tax, $total
+            $payload,
+            $resolved,
+            $customer,
+            $channel,
+            $cashier,
+            $payment,
+            $promoCode,
+            $subtotal,
+            $memberDiscount
         ) {
+            $promotion = null;
+            $promoDiscount = 0;
+
+            /*
+             * Promotion V2:
+             *
+             * Lock promotion row so multiple simultaneous
+             * paid orders cannot easily exceed usage limits.
+             */
+            if ($promoCode) {
+                $promotion = Promotion::query()
+                    ->where('code', $promoCode)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$promotion) {
+                    throw ValidationException::withMessages([
+                        'promo_code' => [
+                            'Invalid promotion code.',
+                        ],
+                    ]);
+                }
+
+                $result = $promotion->validateForOrder(
+                    $subtotal,
+                    $this->promotionCustomerId($customer),
+                    $channel
+                );
+
+                if (!$result['valid']) {
+                    throw ValidationException::withMessages([
+                        'promo_code' => [
+                            $result['message'],
+                        ],
+                    ]);
+                }
+
+                $promoDiscount = round(
+                    (float) $result['discount'],
+                    2
+                );
+            }
+
+            /*
+             * Existing member discount + promotion discount
+             * are still combined for now.
+             *
+             * Later Dynamic Loyalty will control whether
+             * these are allowed to stack.
+             */
+            $totalDiscount = round(
+                $memberDiscount + $promoDiscount,
+                2
+            );
+
+            /*
+             * Never allow total discount above subtotal.
+             */
+            $totalDiscount = min(
+                $totalDiscount,
+                $subtotal
+            );
+
+            $taxBase = max(
+                0,
+                $subtotal - $totalDiscount
+            );
+
+            $tax = round(
+                $taxBase * $this->taxRate,
+                2
+            );
+
+            $total = round(
+                $taxBase + $tax,
+                2
+            );
+
             $order = Order::create([
-                'order_no'       => Order::nextOrderNo(),
-                'customer_id'    => $customer->id,
-                'customer_name'  => $customer->name,
-                'channel'        => $channel,
-                'table_id'       => $payload['table_id'] ?? null,
-                'subtotal'       => round($subtotal, 2),
-                'discount'       => $totalDiscount,
-                'tax'            => $tax,
-                'total'          => $total,
-                'status'         => $payment ? 'completed' : 'pending_payment',
+                'order_no' => Order::nextOrderNo(),
+
+                'customer_id' => $customer->id,
+                'customer_name' => $customer->name,
+
+                'channel' => $channel,
+
+                'table_id' =>
+                    $payload['table_id'] ?? null,
+
+                'subtotal' => $subtotal,
+
+                'member_discount' =>
+                    $memberDiscount,
+
+                'promo_discount' =>
+                    $promoDiscount,
+
+                'discount' =>
+                    $totalDiscount,
+
+                'tax' => $tax,
+                'total' => $total,
+
+                'status' =>
+                    $payment
+                        ? 'completed'
+                        : 'pending_payment',
+
                 'kitchen_status' => 'pending',
-                'promo_code'     => $promoCode,
-                'notes'          => $payload['notes'] ?? null,
-                'cashier_id'     => $cashier?->id,
+
+                'promo_code' =>
+                    $promotion?->code,
+
+                'promotion_id' =>
+                    $promotion?->id,
+
+                'notes' =>
+                    $payload['notes'] ?? null,
+
+                'cashier_id' =>
+                    $cashier?->id,
             ]);
 
             foreach ($resolved as $line) {
                 OrderItem::create([
-                    'order_id'   => $order->id,
-                    'product_id' => $line['product']->id,
-                    'name'       => $line['product']->name,
-                    'price'      => $line['price'],
-                    'qty'        => $line['qty'],
+                    'order_id' => $order->id,
+                    'product_id' =>
+                        $line['product']->id,
+                    'name' =>
+                        $line['product']->name,
+                    'price' =>
+                        $line['price'],
+                    'qty' =>
+                        $line['qty'],
                 ]);
             }
 
-            // Payment (optional — QR orders may pay at counter later)
+            /*
+             * Immediate payment.
+             */
             if ($payment) {
                 Payment::create([
-                    'order_id'  => $order->id,
-                    'amount'    => $total,
-                    'method'    => $payment['method'] ?? 'cash',
-                    'status'    => 'paid',
-                    'reference' => 'PAY' . str_pad((string)(20260000 + $order->id), 8, '0', STR_PAD_LEFT),
-                    'paid_at'   => now(),
+                    'order_id' => $order->id,
+                    'amount' => $total,
+
+                    'method' =>
+                        $payment['method'] ?? 'cash',
+
+                    'status' => 'paid',
+
+                    'reference' =>
+                        'PAY' .
+                        str_pad(
+                            (string) (
+                                20260000 + $order->id
+                            ),
+                            8,
+                            '0',
+                            STR_PAD_LEFT
+                        ),
+
+                    'paid_at' => now(),
                 ]);
-            }
 
-            // Inventory deduction
-            foreach ($resolved as $line) {
-                $this->deductInventory($line['product'], $line['qty'], $order->order_no);
-            }
-
-            // Loyalty points + tier upgrade (skip for walk-in)
-            if ($customer->id !== 8 && $payment) {
-                $earned = (int) floor($total * $customer->point_multiplier);
-                $customer->points = (int) $customer->points + $earned;
-                $customer->total_spent = round((float) $customer->total_spent + $total, 2);
-
-                $newTier = $this->resolveTier((float) $customer->total_spent);
-                if ($newTier !== $customer->membership) {
-                    $oldTier = $customer->membership;
-                    $customer->membership = $newTier;
-                    AuditLog::record($cashier, 'LOYALTY_UPGRADE', "{$customer->name}: {$oldTier} → {$newTier}");
+                /*
+                 * Promotion is consumed ONLY after
+                 * successful payment.
+                 */
+                if (
+                    $promotion &&
+                    $promoDiscount > 0
+                ) {
+                    $this->recordPromotionUsage(
+                        $promotion,
+                        $order,
+                        $customer
+                    );
                 }
-                $customer->save();
             }
 
-            // Audit
-            AuditLog::record($cashier, 'ORDER_CREATED',
-                "{$order->order_no} RM" . number_format($total, 2) . " via " . ($payment['method'] ?? 'pending')
+            /*
+             * Existing inventory behaviour retained.
+             */
+            foreach ($resolved as $line) {
+                $this->deductInventory(
+                    $line['product'],
+                    $line['qty'],
+                    $order->order_no
+                );
+            }
+
+            /*
+             * Existing loyalty logic retained temporarily.
+             */
+            if (
+                $customer->id !== 8 &&
+                $payment
+            ) {
+                $this->awardLoyalty(
+                    $customer,
+                    $total,
+                    $cashier
+                );
+            }
+
+            AuditLog::record(
+                $cashier,
+                'ORDER_CREATED',
+                "{$order->order_no} RM" .
+                number_format($total, 2) .
+                ' via ' .
+                ($payment['method'] ?? 'pending')
             );
+
             if ($payment) {
-                AuditLog::record($cashier, 'PAYMENT_RECEIVED',
-                    strtoupper($payment['method'] ?? 'cash') . ' RM' . number_format($total, 2) . " for {$order->order_no}"
+                AuditLog::record(
+                    $cashier,
+                    'PAYMENT_RECEIVED',
+                    strtoupper(
+                        $payment['method'] ?? 'cash'
+                    ) .
+                    ' RM' .
+                    number_format($total, 2) .
+                    " for {$order->order_no}"
+                );
+            }
+
+            if (
+                $promotion &&
+                $promoDiscount > 0
+            ) {
+                AuditLog::record(
+                    $cashier,
+                    'PROMO_APPLIED',
+                    "{$promotion->code} RM" .
+                    number_format(
+                        $promoDiscount,
+                        2
+                    ) .
+                    " on {$order->order_no}"
                 );
             }
 
             return $order;
         });
 
-        return $order->load(['items', 'payment', 'customer', 'table', 'cashier']);
+        return $order->load([
+            'items',
+            'payment',
+            'customer',
+            'table',
+            'cashier',
+            'promotion',
+        ]);
     }
 
     /**
-     * Deduct inventory based on a product's recipe.
-     * Negative stock allowed (kitchen may oversell during rush; manager reconciles).
+     * Take payment for a pending order.
      */
-    private function deductInventory(Product $product, int $qty, string $orderNo): void
-    {
-        $recipe = $product->recipe ?? [];
-        foreach ($recipe as $r) {
-            $inv = InventoryItem::find($r['ingredient_id'] ?? null);
-            if (!$inv) continue;
-            $usage = (float) $r['qty'] * $qty;
-            $inv->stock = round((float) $inv->stock - $usage, 2);
-            $inv->save();
-
-            StockMovement::create([
-                'inventory_item_id' => $inv->id,
-                'type'              => 'out',
-                'qty'               => $usage,
-                'reason'            => "Order {$orderNo} - {$product->name}",
-            ]);
-        }
-    }
-
-    /**
-     * Determine appropriate membership tier based on lifetime spend.
-     */
-    private function resolveTier(float $totalSpent): string
-    {
-        if ($totalSpent >= 800) return 'Platinum';
-        if ($totalSpent >= 300) return 'Gold';
-        if ($totalSpent >= 100) return 'Silver';
-        return 'Bronze';
-    }
-
-    /**
-     * Take payment for an order that's in pending_payment status
-     * (typically a QR order paid at the counter after the customer arrives).
-     *
-     * Creates the Payment record, flips order.status to 'completed', awards
-     * loyalty points / tier upgrade, and writes audit entries.
-     */
-    public function takePayment(Order $order, string $method, ?User $cashier = null): Order
-    {
+    public function takePayment(
+        Order $order,
+        string $method,
+        ?User $cashier = null
+    ): Order {
         if ($order->status !== 'pending_payment') {
             throw ValidationException::withMessages([
-                'order' => ["Order {$order->order_no} is not pending payment (current status: {$order->status})."],
+                'order' => [
+                    "Order {$order->order_no} is not pending payment " .
+                    "(current status: {$order->status}).",
+                ],
             ]);
         }
 
-        return DB::transaction(function () use ($order, $method, $cashier) {
-            // Create the Payment record
+        return DB::transaction(function () use (
+            $order,
+            $method,
+            $cashier
+        ) {
+            /*
+             * Lock the order so two cashiers cannot
+             * process the same pending order simultaneously.
+             */
+            $lockedOrder = Order::query()
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (
+                $lockedOrder->status !==
+                'pending_payment'
+            ) {
+                throw ValidationException::withMessages([
+                    'order' => [
+                        "Order {$lockedOrder->order_no} " .
+                        'has already been paid or processed.',
+                    ],
+                ]);
+            }
+
+            $promotion = null;
+
+            /*
+             * Revalidate promotion at payment time.
+             *
+             * Pending orders have NOT consumed a promotion
+             * yet, so limits may have changed while waiting.
+             */
+            if (
+                $lockedOrder->promotion_id &&
+                (float) $lockedOrder->promo_discount > 0
+            ) {
+                $promotion = Promotion::query()
+                    ->whereKey(
+                        $lockedOrder->promotion_id
+                    )
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$promotion) {
+                    throw ValidationException::withMessages([
+                        'promo_code' => [
+                            'Promotion is no longer available.',
+                        ],
+                    ]);
+                }
+
+                $result =
+                    $promotion->validateForOrder(
+                        (float) $lockedOrder->subtotal,
+                        $this->promotionCustomerId(
+                            $lockedOrder->customer
+                        ),
+                        $lockedOrder->channel
+                    );
+
+                if (!$result['valid']) {
+                    throw ValidationException::withMessages([
+                        'promo_code' => [
+                            'Promotion can no longer be redeemed: ' .
+                            $result['message'],
+                        ],
+                    ]);
+                }
+
+                /*
+                 * We preserve the discount snapshot calculated
+                 * when the customer placed the order.
+                 *
+                 * We DO NOT recalculate the order price here.
+                 */
+            }
+
             Payment::create([
-                'order_id'  => $order->id,
-                'amount'    => $order->total,
-                'method'    => $method,
-                'status'    => 'paid',
-                'reference' => 'PAY' . str_pad((string)(20260000 + $order->id), 8, '0', STR_PAD_LEFT),
-                'paid_at'   => now(),
+                'order_id' =>
+                    $lockedOrder->id,
+
+                'amount' =>
+                    $lockedOrder->total,
+
+                'method' =>
+                    $method,
+
+                'status' =>
+                    'paid',
+
+                'reference' =>
+                    'PAY' .
+                    str_pad(
+                        (string) (
+                            20260000 +
+                            $lockedOrder->id
+                        ),
+                        8,
+                        '0',
+                        STR_PAD_LEFT
+                    ),
+
+                'paid_at' =>
+                    now(),
             ]);
 
-            // Flip order to completed; record which cashier handled it
-            $order->status     = 'completed';
-            $order->cashier_id = $cashier?->id;
-            $order->save();
+            $lockedOrder->status = 'completed';
+            $lockedOrder->cashier_id =
+                $cashier?->id;
 
-            // Loyalty points + tier upgrade (skip walk-in id=8 and null)
-            if ($order->customer_id && $order->customer_id !== 8) {
-                $customer = Customer::find($order->customer_id);
+            $lockedOrder->save();
+
+            /*
+             * Promotion becomes officially used now.
+             */
+            if ($promotion) {
+                $this->recordPromotionUsage(
+                    $promotion,
+                    $lockedOrder,
+                    $lockedOrder->customer
+                );
+
+                AuditLog::record(
+                    $cashier,
+                    'PROMO_REDEEMED',
+                    "{$promotion->code} on " .
+                    $lockedOrder->order_no
+                );
+            }
+
+            /*
+             * Loyalty awarded after successful payment.
+             */
+            if (
+                $lockedOrder->customer_id &&
+                $lockedOrder->customer_id !== 8
+            ) {
+                $customer =
+                    $lockedOrder->customer;
+
                 if ($customer) {
-                    $earned = (int) floor((float) $order->total * $customer->point_multiplier);
-                    $customer->points      = (int) $customer->points + $earned;
-                    $customer->total_spent = round((float) $customer->total_spent + (float) $order->total, 2);
-
-                    $newTier = $this->resolveTier((float) $customer->total_spent);
-                    if ($newTier !== $customer->membership) {
-                        $oldTier = $customer->membership;
-                        $customer->membership = $newTier;
-                        AuditLog::record($cashier, 'LOYALTY_UPGRADE', "{$customer->name}: {$oldTier} → {$newTier}");
-                    }
-                    $customer->save();
+                    $this->awardLoyalty(
+                        $customer,
+                        (float) $lockedOrder->total,
+                        $cashier
+                    );
                 }
             }
 
-            AuditLog::record($cashier, 'PAYMENT_RECEIVED',
-                strtoupper($method) . ' RM' . number_format((float) $order->total, 2) . " for {$order->order_no} (was pending)"
+            AuditLog::record(
+                $cashier,
+                'PAYMENT_RECEIVED',
+                strtoupper($method) .
+                ' RM' .
+                number_format(
+                    (float) $lockedOrder->total,
+                    2
+                ) .
+                " for {$lockedOrder->order_no} " .
+                '(was pending)'
             );
 
-            return $order;
+            return $lockedOrder->load([
+                'items',
+                'payment',
+                'customer',
+                'table',
+                'cashier',
+                'promotion',
+            ]);
         });
     }
 
     /**
-     * Restore inventory + reverse loyalty points (used by refund flow).
+     * Record successful promotion redemption.
      */
-    public function reverse(Order $order, ?User $byUser = null): void
-    {
-        DB::transaction(function () use ($order, $byUser) {
-            // Restore inventory
+    private function recordPromotionUsage(
+        Promotion $promotion,
+        Order $order,
+        ?Customer $customer
+    ): void {
+        /*
+         * Prevent duplicate usage for the same order.
+         */
+        if (
+            PromotionUsage::where(
+                'promotion_id',
+                $promotion->id
+            )
+                ->where(
+                    'order_id',
+                    $order->id
+                )
+                ->exists()
+        ) {
+            return;
+        }
+
+        PromotionUsage::create([
+            'promotion_id' =>
+                $promotion->id,
+
+            'order_id' =>
+                $order->id,
+
+            /*
+             * Walk-in customer is anonymous for
+             * redemption tracking purposes.
+             */
+            'customer_id' =>
+                $this->promotionCustomerId(
+                    $customer
+                ),
+
+            'promotion_code' =>
+                $promotion->code,
+
+            'discount_type' =>
+                $promotion->type,
+
+            'discount_value' =>
+                $promotion->value,
+
+            'discount_amount' =>
+                $order->promo_discount,
+
+            'order_subtotal' =>
+                $order->subtotal,
+
+            'used_at' =>
+                now(),
+        ]);
+    }
+
+    /**
+     * Convert special Walk-in Customer into null
+     * for promotion usage/eligibility.
+     */
+    private function promotionCustomerId(
+        ?Customer $customer
+    ): ?int {
+        if (!$customer || $customer->id === 8) {
+            return null;
+        }
+
+        return $customer->id;
+    }
+
+    /**
+     * Existing loyalty logic extracted into helper.
+     *
+     * This will be replaced later by Dynamic Loyalty.
+     */
+    private function awardLoyalty(
+        Customer $customer,
+        float $total,
+        ?User $cashier
+    ): void {
+        $earned = (int) floor(
+            $total *
+            $customer->point_multiplier
+        );
+
+        $customer->points =
+            (int) $customer->points +
+            $earned;
+
+        $customer->total_spent = round(
+            (float) $customer->total_spent +
+            $total,
+            2
+        );
+
+        $newTier = $this->resolveTier(
+            (float) $customer->total_spent
+        );
+
+        if (
+            $newTier !==
+            $customer->membership
+        ) {
+            $oldTier =
+                $customer->membership;
+
+            $customer->membership =
+                $newTier;
+
+            AuditLog::record(
+                $cashier,
+                'LOYALTY_UPGRADE',
+                "{$customer->name}: " .
+                "{$oldTier} → {$newTier}"
+            );
+        }
+
+        $customer->save();
+    }
+
+    /**
+     * Deduct inventory based on product recipe.
+     */
+    private function deductInventory(
+        Product $product,
+        int $qty,
+        string $orderNo
+    ): void {
+        $recipe = $product->recipe ?? [];
+
+        foreach ($recipe as $r) {
+            $inv = InventoryItem::find(
+                $r['ingredient_id'] ?? null
+            );
+
+            if (!$inv) {
+                continue;
+            }
+
+            $usage =
+                (float) $r['qty'] * $qty;
+
+            $inv->stock = round(
+                (float) $inv->stock -
+                $usage,
+                2
+            );
+
+            $inv->save();
+
+            StockMovement::create([
+                'inventory_item_id' =>
+                    $inv->id,
+
+                'type' =>
+                    'out',
+
+                'qty' =>
+                    $usage,
+
+                'reason' =>
+                    "Order {$orderNo} - " .
+                    $product->name,
+            ]);
+        }
+    }
+
+    /**
+     * Temporary hardcoded membership tier logic.
+     *
+     * Will be removed during Dynamic Loyalty phase.
+     */
+    private function resolveTier(
+        float $totalSpent
+    ): string {
+        if ($totalSpent >= 800) {
+            return 'Platinum';
+        }
+
+        if ($totalSpent >= 300) {
+            return 'Gold';
+        }
+
+        if ($totalSpent >= 100) {
+            return 'Silver';
+        }
+
+        return 'Bronze';
+    }
+
+    /**
+     * Restore inventory + reverse loyalty.
+     */
+    public function reverse(
+        Order $order,
+        ?User $byUser = null
+    ): void {
+        DB::transaction(function () use (
+            $order,
+            $byUser
+        ) {
             foreach ($order->items as $item) {
                 $product = $item->product;
-                if (!$product || !$product->recipe) continue;
-                foreach ($product->recipe as $r) {
-                    $inv = InventoryItem::find($r['ingredient_id'] ?? null);
-                    if (!$inv) continue;
-                    $restore = (float) $r['qty'] * $item->qty;
-                    $inv->stock = round((float) $inv->stock + $restore, 2);
+
+                if (
+                    !$product ||
+                    !$product->recipe
+                ) {
+                    continue;
+                }
+
+                foreach (
+                    $product->recipe as $r
+                ) {
+                    $inv = InventoryItem::find(
+                        $r['ingredient_id']
+                            ?? null
+                    );
+
+                    if (!$inv) {
+                        continue;
+                    }
+
+                    $restore =
+                        (float) $r['qty'] *
+                        $item->qty;
+
+                    $inv->stock = round(
+                        (float) $inv->stock +
+                        $restore,
+                        2
+                    );
+
                     $inv->save();
 
                     StockMovement::create([
-                        'inventory_item_id' => $inv->id,
-                        'type'              => 'in',
-                        'qty'               => $restore,
-                        'reason'            => "Refund {$order->order_no} - {$item->name}",
+                        'inventory_item_id' =>
+                            $inv->id,
+
+                        'type' =>
+                            'in',
+
+                        'qty' =>
+                            $restore,
+
+                        'reason' =>
+                            "Refund " .
+                            "{$order->order_no} - " .
+                            $item->name,
                     ]);
                 }
             }
 
-            // Reverse loyalty
+            /*
+             * Existing loyalty refund logic retained
+             * for now.
+             *
+             * We already identified that this should
+             * later use an earned-points snapshot.
+             */
             $customer = $order->customer;
-            if ($customer && $customer->id !== 8) {
-                $reverse = (int) floor((float) $order->total * $customer->point_multiplier);
-                $customer->points = max(0, (int) $customer->points - $reverse);
-                $customer->total_spent = max(0, round((float) $customer->total_spent - (float) $order->total, 2));
+
+            if (
+                $customer &&
+                $customer->id !== 8
+            ) {
+                $reverse = (int) floor(
+                    (float) $order->total *
+                    $customer->point_multiplier
+                );
+
+                $customer->points = max(
+                    0,
+                    (int) $customer->points -
+                    $reverse
+                );
+
+                $customer->total_spent = max(
+                    0,
+                    round(
+                        (float) $customer->total_spent -
+                        (float) $order->total,
+                        2
+                    )
+                );
+
                 $customer->save();
             }
 
+            /*
+             * Promotion usage intentionally remains consumed
+             * after refund.
+             *
+             * This prevents:
+             * use promo -> refund -> reuse promo abuse.
+             */
             $order->status = 'refunded';
             $order->save();
 
-            AuditLog::record($byUser, 'ORDER_REVERSED', "{$order->order_no} refund processed");
+            AuditLog::record(
+                $byUser,
+                'ORDER_REVERSED',
+                "{$order->order_no} refund processed"
+            );
         });
     }
 }
