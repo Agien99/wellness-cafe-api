@@ -83,7 +83,7 @@ class ProductController extends Controller
     public function uploadImage(Request $request, Product $product): JsonResponse
     {
         $request->validate([
-            'image' => ['required', 'image', 'max:4096'], // up to 4 MB
+            'image' => ['required', 'image', 'max:20480'], // up to 200 MB
         ]);
 
         // Remove previous file if any (don't leave orphans)
