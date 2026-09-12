@@ -335,8 +335,19 @@ VIEWS.dashboard = async (root) => {
 
 /* ===== POS TERMINAL ===== */
 let pos = {
-  cart: [], categoryId: null, customerId: 8,
-  tableId: null, channel: 'pos', promoCode: null,
+  cart: [],
+  categoryId: null,
+  customerId: 8,
+  tableId: null,
+  channel: 'pos',
+
+  promoCode: null,
+
+  /*
+   * Stores the result returned by
+   * Promotion V2 backend validation.
+   */
+  promoValidation: null,
 };
 
 VIEWS.pos = async (root) => {
@@ -551,28 +562,50 @@ VIEWS.pos = async (root) => {
     );
   }
 
+  function clearAppliedPromo() {
+    pos.promoCode = null;
+    pos.promoValidation = null;
+  }
+
   $('#custSel').addEventListener('change', e => {
     pos.customerId = +e.target.value;
+
+    clearAppliedPromo();
+
     renderCart();
   });
 
   $('#chanSel').addEventListener('change', e => {
     pos.channel = e.target.value;
-  });
 
+    clearAppliedPromo();
+
+    renderCart();
+  });
+  
   $('#tableSel').addEventListener('change', e => {
     pos.tableId = e.target.value ? +e.target.value : null;
   });
 
   $('#clearCart').addEventListener('click', () => {
     pos.cart = [];
+
+    clearAppliedPromo();
+
     renderCart();
   });
 
   $('#parkOrder').addEventListener('click', () => {
     pos.cart = [];
+
+    clearAppliedPromo();
+
     renderCart();
-    toast('Order parked.', 'success');
+
+    toast(
+      'Order parked.',
+      'success'
+    );
   });
 
   $('#payBtn').addEventListener('click', openPayModal);
@@ -767,6 +800,8 @@ VIEWS.pos = async (root) => {
           });
         }
 
+        clearAppliedPromo();
+
         renderCart();
       });
     });
@@ -898,26 +933,31 @@ VIEWS.pos = async (root) => {
 
       </div>`).join('');
 
-    $$('#cartItems button').forEach(b => b.addEventListener('click', () => {
-      const i = +b.dataset.i;
-      const act = b.dataset.act;
+    $$('#cartItems button').forEach(
+      b => b.addEventListener(
+        'click',
+        () => {
+          const i = +b.dataset.i;
+          const act = b.dataset.act;
 
-      if (act === 'inc') {
-        pos.cart[i].qty += 1;
-      }
+          if (act === 'inc') {
+            pos.cart[i].qty += 1;
+          }
+          else if (act === 'dec') {
+            if (pos.cart[i].qty > 1) {
+              pos.cart[i].qty -= 1;
+            }
+          }
+          else if (act === 'rem') {
+            pos.cart.splice(i, 1);
+          }
 
-      else if (act === 'dec') {
-        if (pos.cart[i].qty > 1) {
-          pos.cart[i].qty -= 1;
+          clearAppliedPromo();
+
+          renderCart();
         }
-      }
-
-      else if (act === 'rem') {
-        pos.cart.splice(i, 1);
-      }
-
-      renderCart();
-    }));
+      )
+    );
 
     const sub =
       pos.cart.reduce(
@@ -1053,32 +1093,27 @@ VIEWS.pos = async (root) => {
   }
 
   function computePromoDiscount(sub) {
-    if (!pos.promoCode) {
+    if (
+      !pos.promoCode ||
+      !pos.promoValidation
+    ) {
       return 0;
     }
 
-    const promo =
-      state.promotions.find(
-        p =>
-          p.code === pos.promoCode &&
-          p.active
-      );
+    const validContext =
+      r2(pos.promoValidation.subtotal) === r2(sub)
+      &&
+      pos.promoValidation.customerId === pos.customerId
+      &&
+      pos.promoValidation.channel === pos.channel;
 
-    if (!promo) {
+    if (!validContext) {
       return 0;
     }
 
-    if (sub < num(promo.min_order)) {
-      return 0;
-    }
-
-    if (promo.type === 'percent') {
-      return r2(
-        sub * num(promo.value) / 100
-      );
-    }
-
-    return num(promo.value);
+    return r2(
+      num(pos.promoValidation.discount)
+    );
   }
 
   function openPayModal() {
@@ -1134,7 +1169,7 @@ VIEWS.pos = async (root) => {
           Promo Code (Optional)
         </div>
 
-        <div class="flex gap-2 mb-4">
+        <div class="pos-promo-entry mb-4">
 
           <input
             type="text"
@@ -1304,40 +1339,89 @@ VIEWS.pos = async (root) => {
     $('#applyPromo').addEventListener(
       'click',
       async () => {
+        const input =
+          $('#promoIn');
+
+        const button =
+          $('#applyPromo');
+
         const code =
-          $('#promoIn')
+          input
             .value
             .trim()
             .toUpperCase();
 
         if (!code) {
+          toast(
+            'Enter a promotion code.',
+            'warn'
+          );
+
+          input.focus();
+
           return;
         }
 
-        try {
-          const sub =
-            pos.cart.reduce(
-              (s,x) =>
-                s +
-                x.price *
-                x.qty,
-              0
-            );
+        const sub =
+          pos.cart.reduce(
+            (sum, item) =>
+              sum +
+              item.price *
+              item.qty,
+            0
+          );
 
+        button.disabled = true;
+        button.textContent = 'Checking...';
+
+        try {
           const r =
             await API.post(
               '/promotions/validate',
               {
                 code,
-                subtotal: sub
+                subtotal: r2(sub),
+
+                customer_id:
+                  pos.customerId === 8
+                    ? null
+                    : pos.customerId,
+
+                channel:
+                  pos.channel,
               }
             );
+
+          if (!r.valid) {
+            throw new Error(
+              r.message ||
+              'Promotion is not valid.'
+            );
+          }
 
           pos.promoCode =
             code;
 
+          pos.promoValidation = {
+            discount:
+              num(r.discount),
+
+            subtotal:
+              r2(sub),
+
+            customerId:
+              pos.customerId,
+
+            channel:
+              pos.channel,
+
+            promo:
+              r.promo || null,
+          };
+
           toast(
-            r.message,
+            r.message ||
+            `${code} applied.`,
             'success'
           );
 
@@ -1351,11 +1435,26 @@ VIEWS.pos = async (root) => {
           );
         }
         catch (err) {
-          toast(
+          const promoError =
+            err.payload
+              ?.errors
+              ?.promo_code?.[0];
+
+          const message =
+            promoError ||
             err.payload?.message ||
-            'Invalid promo',
+            err.message ||
+            'Promotion could not be applied.';
+
+          clearAppliedPromo();
+
+          toast(
+            message,
             'error'
           );
+
+          button.disabled = false;
+          button.textContent = 'Apply';
         }
       }
     );
@@ -1364,8 +1463,7 @@ VIEWS.pos = async (root) => {
       $('#removePromo').addEventListener(
         'click',
         () => {
-          pos.promoCode =
-            null;
+          clearAppliedPromo();
 
           closeModal();
 
@@ -1456,7 +1554,9 @@ VIEWS.pos = async (root) => {
       );
 
       pos.cart = [];
-      pos.promoCode = null;
+
+      clearAppliedPromo();
+
       pos.tableId = null;
 
       state.customers =
@@ -1471,7 +1571,19 @@ VIEWS.pos = async (root) => {
       btn.textContent =
         '✓ Complete Sale';
 
+      const promoError =
+        err.payload
+          ?.errors
+          ?.promo_code?.[0];
+
+      const orderError =
+        err.payload
+          ?.errors
+          ?.order?.[0];
+
       toast(
+        promoError ||
+        orderError ||
         err.payload?.message ||
         err.message ||
         'Sale failed',
@@ -2958,76 +3070,900 @@ async function deleteTable(id) {
 
 VIEWS.promo = async (root) => {
   const promos = await API.get('/promotions?all=1');
+
   state.promotions = promos;
+
+  const statusLabel = {
+    active: 'Active',
+    scheduled: 'Scheduled',
+    expired: 'Expired',
+    disabled: 'Disabled',
+    usage_limit_reached: 'Limit Reached',
+  };
+
+  const statusClass = {
+    active: 'badge-success',
+    scheduled: 'badge-info',
+    expired: 'badge-danger',
+    disabled: 'badge-secondary',
+    usage_limit_reached: 'badge-warn',
+  };
+
   root.innerHTML = `
-    <div class="toolbar"><button class="btn primary" onclick="app.openPromoForm()">+ New Promotion</button></div>
-    <div class="card"><table class="data">
-      <thead><tr><th>Code</th><th>Name</th><th>Type</th><th class="text-right">Value</th><th class="text-right">Min Order</th><th>Valid Till</th><th>Status</th><th></th></tr></thead>
-      <tbody>${promos.map(p=>`<tr>
-        <td><code style="background:#f3f4f6;padding:2px 8px;border-radius:4px;font-weight:600">${p.code}</code></td>
-        <td>${p.name}</td>
-        <td><span class="badge badge-info">${p.type}</span></td>
-        <td class="text-right">${p.type==='percent'?p.value+'%':money(p.value)}</td>
-        <td class="text-right">${money(p.min_order)}</td>
-        <td>${p.valid_till||'-'}</td>
-        <td><span class="badge ${p.active?'badge-success':'badge-danger'}">${p.active?'Active':'Inactive'}</span></td>
-        <td><button class="btn sm" onclick="app.openPromoForm(${p.id})">Edit</button></td>
-      </tr>`).join('') || '<tr><td colspan="8" class="text-center text-muted">No promotions</td></tr>'}</tbody>
-    </table></div>`;
+    <div class="toolbar">
+      <button
+        class="btn primary"
+        onclick="app.openPromoForm()"
+      >
+        + New Promotion
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h3>Promotion Campaigns</h3>
+          <small>
+            Configure discount rules, eligibility,
+            limits and availability
+          </small>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Promotion</th>
+              <th>Discount</th>
+              <th>Minimum Spend</th>
+              <th>Validity</th>
+              <th>Usage</th>
+              <th>Audience</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              promos.length
+                ? promos.map(p => {
+                    const discount =
+                      p.type === 'percent'
+                        ? `${num(p.value)}%${
+                            p.max_discount
+                              ? ` · Max ${money(p.max_discount)}`
+                              : ''
+                          }`
+                        : money(p.value);
+
+                    const validity = `
+                      <div class="promo-validity">
+                        <span>
+                          ${p.starts_at
+                            ? fmtDate(p.starts_at, false)
+                            : 'Immediate'}
+                        </span>
+
+                        <span class="text-muted">
+                          →
+                        </span>
+
+                        <span>
+                          ${p.ends_at
+                            ? fmtDate(p.ends_at, false)
+                            : 'No expiry'}
+                        </span>
+                      </div>
+                    `;
+
+                    const usageLimit =
+                      p.usage_limit === null
+                        ? 'Unlimited'
+                        : `${p.usage_count ?? 0} / ${p.usage_limit}`;
+
+                    const perCustomer =
+                      p.usage_limit_per_customer
+                        ? `Max ${p.usage_limit_per_customer} per customer`
+                        : 'No customer limit';
+
+                    const audience =
+                      p.customer_scope === 'registered'
+                        ? 'Registered only'
+                        : 'All customers';
+
+                    return `
+                      <tr>
+                        <td>
+                          <code class="promo-code">
+                            ${p.code}
+                          </code>
+                        </td>
+
+                        <td>
+                          <div class="promo-name">
+                            <b>${p.name}</b>
+
+                            ${
+                              p.description
+                                ? `<small>${p.description}</small>`
+                                : ''
+                            }
+                          </div>
+                        </td>
+
+                        <td>
+                          <b>${discount}</b>
+
+                          <small class="block text-muted">
+                            ${p.type === 'percent'
+                              ? 'Percentage'
+                              : 'Fixed amount'}
+                          </small>
+                        </td>
+
+                        <td>
+                          ${money(p.min_order || 0)}
+                        </td>
+
+                        <td>
+                          ${validity}
+                        </td>
+
+                        <td>
+                          <div>
+                            <b>${usageLimit}</b>
+                          </div>
+
+                          <small class="text-muted">
+                            ${perCustomer}
+                          </small>
+                        </td>
+
+                        <td>
+                          <div>${audience}</div>
+
+                          <small class="text-muted">
+                            ${
+                              p.allowed_channels?.length
+                                ? p.allowed_channels
+                                    .map(x => x.toUpperCase())
+                                    .join(', ')
+                                : 'All channels'
+                            }
+                          </small>
+                        </td>
+
+                        <td>
+                          <span
+                            class="badge ${
+                              statusClass[p.status]
+                                || 'badge-secondary'
+                            }"
+                          >
+                            ${
+                              statusLabel[p.status]
+                                || p.status
+                                || 'Unknown'
+                            }
+                          </span>
+                        </td>
+
+                        <td>
+                          <button
+                            class="btn sm"
+                            onclick="app.openPromoForm(${p.id})"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')
+                : `
+                  <tr>
+                    <td
+                      colspan="9"
+                      class="text-center text-muted"
+                    >
+                      No promotions created yet.
+                    </td>
+                  </tr>
+                `
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 };
 
 async function openPromoForm(id) {
   const isNew = !id;
+
+  const defaultEndDate =
+    new Date(
+      Date.now() + 30 * 86400000
+    )
+      .toISOString()
+      .slice(0, 16);
+
   const p = isNew
-    ? { code:'', name:'', type:'percent', value: 10, min_order: 0, valid_till: new Date(Date.now()+30*86400000).toISOString().split('T')[0], active: true }
-    : state.promotions.find(x => x.id === id);
-  openModal(`
-    <div class="modal-head"><h3>${isNew?'New Promotion':'Edit Promotion'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-    <div class="modal-body">
-      <div class="form-row">
-        <div class="field"><label>Code</label><input id="pCode" value="${p.code}" style="text-transform:uppercase"></div>
-        <div class="field"><label>Name</label><input id="pName" value="${p.name}"></div>
-      </div>
-      <div class="form-row three">
-        <div class="field"><label>Type</label><select id="pType"><option value="percent" ${p.type==='percent'?'selected':''}>Percent (%)</option><option value="fixed" ${p.type==='fixed'?'selected':''}>Fixed (RM)</option></select></div>
-        <div class="field"><label>Value</label><input id="pVal" type="number" step="0.01" value="${p.value}"></div>
-        <div class="field"><label>Min Order</label><input id="pMin" type="number" step="0.01" value="${p.min_order}"></div>
-      </div>
-      <div class="form-row">
-        <div class="field"><label>Valid Till</label><input id="pTill" type="date" value="${p.valid_till||''}"></div>
-        <div class="field"><label>&nbsp;</label><label><input type="checkbox" id="pActive" ${p.active?'checked':''}> Active</label></div>
-      </div>
-    </div>
-    <div class="modal-foot">
-      ${!isNew?`<button class="btn danger" onclick="app.deletePromo(${id})">🗑 Delete</button>`:''}
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn primary" id="savePromo">${isNew?'Create':'Save'}</button>
-    </div>`);
-  $('#savePromo').addEventListener('click', async () => {
-    const body = {
-      code: $('#pCode').value.trim().toUpperCase(),
-      name: $('#pName').value.trim(),
-      type: $('#pType').value,
-      value: +$('#pVal').value,
-      min_order: +$('#pMin').value,
-      valid_till: $('#pTill').value || null,
-      active: $('#pActive').checked,
-    };
-    if (!body.code || !body.name) { toast('Code and name required', 'error'); return; }
-    try {
-      if (isNew) await API.post('/promotions', body);
-      else       await API.put('/promotions/' + id, body);
-      toast('Saved'); closeModal(); route('promo');
-    } catch (err) {
-      const msg = err.payload?.errors?.code?.[0] || err.payload?.message || 'Save failed';
-      toast(msg, 'error');
+    ? {
+        code: '',
+        name: '',
+        description: '',
+        type: 'percent',
+        value: 10,
+        max_discount: null,
+        min_order: 0,
+        starts_at: null,
+        ends_at: defaultEndDate,
+        usage_limit: null,
+        usage_limit_per_customer: null,
+        stackable: false,
+        customer_scope: 'all',
+        allowed_channels: null,
+        active: true,
+      }
+    : state.promotions.find(
+        x => x.id === id
+      );
+
+  if (!p) {
+    toast(
+      'Promotion could not be found.',
+      'error'
+    );
+    return;
+  }
+
+  const toInputDateTime = (value) => {
+    if (!value) return '';
+
+    const d = new Date(value);
+
+    if (Number.isNaN(d.getTime())) {
+      return '';
     }
+
+    const pad = n =>
+      String(n).padStart(2, '0');
+
+    return (
+      d.getFullYear() +
+      '-' +
+      pad(d.getMonth() + 1) +
+      '-' +
+      pad(d.getDate()) +
+      'T' +
+      pad(d.getHours()) +
+      ':' +
+      pad(d.getMinutes())
+    );
+  };
+
+  const channels =
+    Array.isArray(p.allowed_channels)
+      ? p.allowed_channels
+      : [];
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h3>
+          ${isNew
+            ? 'New Promotion'
+            : 'Edit Promotion'}
+        </h3>
+
+        <small class="text-muted">
+          Configure campaign rules and redemption limits.
+        </small>
+      </div>
+
+      <button
+        type="button"
+        class="close-btn"
+        onclick="app.closeModal()"
+      >
+        ×
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <form id="promoForm">
+
+        <div class="form-section">
+          <div class="form-section-title">
+            Campaign Information
+          </div>
+
+          <div class="form-grid-2">
+            <label>
+              <span>Promotion Code *</span>
+
+              <input
+                id="promoCode"
+                type="text"
+                maxlength="64"
+                value="${p.code || ''}"
+                placeholder="WELCOME10"
+                required
+              >
+            </label>
+
+            <label>
+              <span>Promotion Name *</span>
+
+              <input
+                id="promoName"
+                type="text"
+                maxlength="255"
+                value="${p.name || ''}"
+                placeholder="Welcome Discount"
+                required
+              >
+            </label>
+          </div>
+
+          <label>
+            <span>Description</span>
+
+            <textarea
+              id="promoDescription"
+              rows="3"
+              maxlength="2000"
+              placeholder="Optional internal campaign description"
+            >${p.description || ''}</textarea>
+          </label>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">
+            Discount Rules
+          </div>
+
+          <div class="form-grid-2">
+            <label>
+              <span>Discount Type *</span>
+
+              <select id="promoType">
+                <option
+                  value="percent"
+                  ${p.type === 'percent' ? 'selected' : ''}
+                >
+                  Percentage
+                </option>
+
+                <option
+                  value="fixed"
+                  ${p.type === 'fixed' ? 'selected' : ''}
+                >
+                  Fixed Amount
+                </option>
+              </select>
+            </label>
+
+            <label>
+              <span>Discount Value *</span>
+
+              <input
+                id="promoValue"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value="${num(p.value)}"
+                required
+              >
+            </label>
+
+            <label id="promoMaxDiscountField">
+              <span>Maximum Discount</span>
+
+              <input
+                id="promoMaxDiscount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value="${p.max_discount ?? ''}"
+                placeholder="No limit"
+              >
+
+              <small>
+                Only applies to percentage promotions.
+              </small>
+            </label>
+
+            <label>
+              <span>Minimum Spend</span>
+
+              <input
+                id="promoMinOrder"
+                type="number"
+                min="0"
+                step="0.01"
+                value="${num(p.min_order)}"
+              >
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">
+            Campaign Schedule
+          </div>
+
+          <div class="form-grid-2">
+            <label>
+              <span>Starts At</span>
+
+              <input
+                id="promoStartsAt"
+                type="datetime-local"
+                value="${toInputDateTime(p.starts_at)}"
+              >
+
+              <small>
+                Leave empty to start immediately.
+              </small>
+            </label>
+
+            <label>
+              <span>Ends At</span>
+
+              <input
+                id="promoEndsAt"
+                type="datetime-local"
+                value="${toInputDateTime(p.ends_at)}"
+              >
+
+              <small>
+                Leave empty for no expiry.
+              </small>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">
+            Usage Limits
+          </div>
+
+          <div class="form-grid-2">
+            <label>
+              <span>Total Usage Limit</span>
+
+              <input
+                id="promoUsageLimit"
+                type="number"
+                min="1"
+                step="1"
+                value="${p.usage_limit ?? ''}"
+                placeholder="Unlimited"
+              >
+            </label>
+
+            <label>
+              <span>Usage Limit Per Customer</span>
+
+              <input
+                id="promoCustomerLimit"
+                type="number"
+                min="1"
+                step="1"
+                value="${p.usage_limit_per_customer ?? ''}"
+                placeholder="Unlimited"
+              >
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">
+            Eligibility
+          </div>
+
+          <div class="form-grid-2">
+            <label>
+              <span>Customer Scope</span>
+
+              <select id="promoCustomerScope">
+                <option
+                  value="all"
+                  ${p.customer_scope === 'all' ? 'selected' : ''}
+                >
+                  All Customers
+                </option>
+
+                <option
+                  value="registered"
+                  ${p.customer_scope === 'registered' ? 'selected' : ''}
+                >
+                  Registered Customers Only
+                </option>
+              </select>
+            </label>
+
+            <div>
+              <span class="form-label">
+                Allowed Channels
+              </span>
+
+              <div class="check-grid">
+                <label class="check-card">
+                  <input
+                    type="checkbox"
+                    name="promoChannel"
+                    value="pos"
+                    ${
+                      channels.length === 0 ||
+                      channels.includes('pos')
+                        ? 'checked'
+                        : ''
+                    }
+                  >
+                  <span>POS</span>
+                </label>
+
+                <label class="check-card">
+                  <input
+                    type="checkbox"
+                    name="promoChannel"
+                    value="qr"
+                    ${
+                      channels.length === 0 ||
+                      channels.includes('qr')
+                        ? 'checked'
+                        : ''
+                    }
+                  >
+                  <span>QR Ordering</span>
+                </label>
+
+                <label class="check-card">
+                  <input
+                    type="checkbox"
+                    name="promoChannel"
+                    value="online"
+                    ${
+                      channels.length === 0 ||
+                      channels.includes('online')
+                        ? 'checked'
+                        : ''
+                    }
+                  >
+                  <span>Online</span>
+                </label>
+              </div>
+
+              <small>
+                Select all three to allow the promotion everywhere.
+              </small>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">
+            Campaign Settings
+          </div>
+
+          <div class="check-grid">
+            <label class="check-card">
+              <input
+                id="promoActive"
+                type="checkbox"
+                ${p.active ? 'checked' : ''}
+              >
+
+              <span>
+                <b>Active</b>
+
+                <small>
+                  Promotion may be used when all other rules pass.
+                </small>
+              </span>
+            </label>
+
+            <label class="check-card">
+              <input
+                id="promoStackable"
+                type="checkbox"
+                ${p.stackable ? 'checked' : ''}
+              >
+
+              <span>
+                <b>Stackable</b>
+
+                <small>
+                  Reserved for future multi-reward rules.
+                </small>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        ${
+          !isNew
+            ? `
+              <div class="promo-edit-summary">
+                <div>
+                  <span>Current Status</span>
+                  <b>${p.status || '-'}</b>
+                </div>
+
+                <div>
+                  <span>Total Redemptions</span>
+                  <b>${p.usage_count ?? 0}</b>
+                </div>
+              </div>
+            `
+            : ''
+        }
+
+      </form>
+    </div>
+
+    <div class="modal-foot">
+
+      ${
+        !isNew
+          ? `
+            <button
+              type="button"
+              class="btn danger"
+              onclick="app.deletePromo(${p.id})"
+              style="margin-right:auto"
+            >
+              Delete
+            </button>
+          `
+          : ''
+      }
+
+      <button
+        type="button"
+        class="btn"
+        onclick="app.closeModal()"
+      >
+        Cancel
+      </button>
+
+      <button
+        type="submit"
+        form="promoForm"
+        class="btn primary"
+      >
+        ${isNew
+          ? 'Create Promotion'
+          : 'Save Changes'}
+      </button>
+
+    </div>
+  `, {
+    size: 'lg',
   });
+
+  const typeSelect =
+    $('#promoType');
+
+  const maxField =
+    $('#promoMaxDiscountField');
+
+  function syncDiscountType() {
+    const percentage =
+      typeSelect.value === 'percent';
+
+    maxField.style.display =
+      percentage ? '' : 'none';
+  }
+
+  syncDiscountType();
+
+  typeSelect.addEventListener(
+    'change',
+    syncDiscountType
+  );
+
+  $('#promoForm').addEventListener(
+    'submit',
+    async (event) => {
+      event.preventDefault();
+
+      const selectedChannels = $$(
+        'input[name="promoChannel"]:checked'
+      ).map(input => input.value);
+
+      if (selectedChannels.length === 0) {
+        toast(
+          'Select at least one allowed channel.',
+          'error'
+        );
+
+        return;
+      }
+
+      const allChannelsSelected =
+        selectedChannels.length === 3;
+
+      const startsAt =
+        $('#promoStartsAt').value || null;
+
+      const endsAt =
+        $('#promoEndsAt').value || null;
+
+      if (
+        startsAt &&
+        endsAt &&
+        new Date(endsAt) < new Date(startsAt)
+      ) {
+        toast(
+          'End date cannot be earlier than start date.',
+          'error'
+        );
+
+        return;
+      }
+
+      const usageLimitRaw =
+        $('#promoUsageLimit').value;
+
+      const customerLimitRaw =
+        $('#promoCustomerLimit').value;
+
+      const maxDiscountRaw =
+        $('#promoMaxDiscount').value;
+
+      const payload = {
+        code:
+          $('#promoCode')
+            .value
+            .trim()
+            .toUpperCase(),
+
+        name:
+          $('#promoName')
+            .value
+            .trim(),
+
+        description:
+          $('#promoDescription')
+            .value
+            .trim() || null,
+
+        type:
+          $('#promoType').value,
+
+        value:
+          Number(
+            $('#promoValue').value
+          ),
+
+        max_discount:
+          $('#promoType').value === 'percent'
+          && maxDiscountRaw
+            ? Number(maxDiscountRaw)
+            : null,
+
+        min_order:
+          Number(
+            $('#promoMinOrder').value || 0
+          ),
+
+        starts_at:
+          startsAt,
+
+        ends_at:
+          endsAt,
+
+        usage_limit:
+          usageLimitRaw
+            ? Number(usageLimitRaw)
+            : null,
+
+        usage_limit_per_customer:
+          customerLimitRaw
+            ? Number(customerLimitRaw)
+            : null,
+
+        stackable:
+          $('#promoStackable').checked,
+
+        customer_scope:
+          $('#promoCustomerScope').value,
+
+        allowed_channels:
+          allChannelsSelected
+            ? null
+            : selectedChannels,
+
+        active:
+          $('#promoActive').checked,
+      };
+
+      try {
+        if (isNew) {
+          await API.post(
+            '/promotions',
+            payload
+          );
+
+          toast(
+            'Promotion created.'
+          );
+        } else {
+          await API.put(
+            '/promotions/' + p.id,
+            payload
+          );
+
+          toast(
+            'Promotion updated.'
+          );
+        }
+
+        closeModal();
+
+        route('promo');
+      } catch (err) {
+        const errors =
+          err.payload?.errors;
+
+        let msg =
+          err.payload?.message
+          || 'Save failed';
+
+        if (errors) {
+          const first =
+            Object.values(errors)
+              .flat()[0];
+
+          if (first) {
+            msg = first;
+          }
+        }
+
+        toast(
+          msg,
+          'error'
+        );
+      }
+    }
+  );
 }
+
 async function deletePromo(id) {
-  if (!confirm('Soft-delete this promotion?')) return;
-  try { await API.delete('/promotions/' + id); toast('Deleted'); closeModal(); route('promo'); }
-  catch (err) { toast(err.payload?.message || 'Delete failed', 'error'); }
+  if (
+    !confirm(
+      'Delete this promotion? ' +
+      'Historical redemption records will remain preserved.'
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await API.delete(
+      '/promotions/' + id
+    );
+
+    toast(
+      'Promotion deleted.'
+    );
+
+    closeModal();
+
+    route('promo');
+  } catch (err) {
+    toast(
+      err.payload?.message
+      || 'Delete failed',
+      'error'
+    );
+  }
 }
 
 VIEWS.refund = async (root) => {
@@ -3181,6 +4117,7 @@ async function deleteUser(id) {
 /* ===== APP INIT ===== */
 window.app = {
   route,
+  closeModal,
   viewOrder: viewOrderDetail,
   takePayment: takePaymentForOrder,
   initRefund,

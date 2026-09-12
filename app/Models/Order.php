@@ -10,16 +10,32 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class Order extends Model
 {
     protected $fillable = [
-        'order_no', 'customer_id', 'customer_name', 'channel',
-        'table_id', 'subtotal', 'discount', 'tax', 'total',
-        'status', 'kitchen_status', 'promo_code', 'notes', 'cashier_id',
+        'order_no',
+        'customer_id',
+        'customer_name',
+        'channel',
+        'table_id',
+        'subtotal',
+        'member_discount',
+        'promo_discount',
+        'discount',
+        'tax',
+        'total',
+        'status',
+        'kitchen_status',
+        'promo_code',
+        'promotion_id',
+        'notes',
+        'cashier_id',
     ];
 
     protected $casts = [
-        'subtotal' => 'decimal:2',
-        'discount' => 'decimal:2',
-        'tax'      => 'decimal:2',
-        'total'    => 'decimal:2',
+        'subtotal'        => 'decimal:2',
+        'member_discount' => 'decimal:2',
+        'promo_discount'  => 'decimal:2',
+        'discount'        => 'decimal:2',
+        'tax'             => 'decimal:2',
+        'total'           => 'decimal:2',
     ];
 
     public function customer(): BelongsTo
@@ -50,6 +66,11 @@ class Order extends Model
     public function refunds(): HasMany
     {
         return $this->hasMany(Refund::class);
+    }
+
+    public function promotion(): BelongsTo
+    {
+        return $this->belongsTo(Promotion::class);
     }
 
     /** Generate a sequential order number */

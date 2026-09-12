@@ -2126,3 +2126,669 @@ table.data tr:hover{background:#f9fafb}
 .items-center{align-items:center}.justify-between{justify-content:space-between}
 
 .hidden{display:none !important}
+
+/* ============================================================
+   Promotion V2
+   ============================================================ */
+
+.promo-code {
+  display: inline-block;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+
+.promo-name {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 160px;
+}
+
+.promo-name small {
+  color: var(--muted);
+  max-width: 260px;
+  line-height: 1.35;
+}
+
+.promo-validity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.form-section {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.form-section:first-of-type {
+  padding-top: 0;
+}
+
+.form-section:last-of-type {
+  border-bottom: 0;
+}
+
+.form-section-title {
+  margin-bottom: 14px;
+  font-size: .78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--primary);
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 7px;
+  font-weight: 600;
+}
+
+.check-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.check-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.check-card input {
+  margin-top: 2px;
+}
+
+.check-card span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.check-card small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.promo-edit-summary {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.promo-edit-summary > div {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--primary-light);
+}
+
+.promo-edit-summary span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: .75rem;
+  color: var(--muted);
+}
+
+.block {
+  display: block;
+}
+
+.ml-auto {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.badge-secondary {
+  background: #eef0f3;
+  color: #5b6470;
+}
+
+.badge-warn {
+  background: #fff3cd;
+  color: #8a6400;
+}
+
+@media (max-width: 760px) {
+  .form-grid-2,
+  .promo-edit-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .promo-validity {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+}
+
+/* ============================================================
+   POS PROMOTION ENTRY
+   Desktop + Tablet + Phone
+   ============================================================ */
+
+.pos-promo-entry {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1fr)
+    auto
+    auto;
+
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.pos-promo-entry .search {
+  width: 100%;
+  min-width: 0;
+}
+
+.pos-promo-entry .btn {
+  min-height: 42px;
+  white-space: nowrap;
+  justify-content: center;
+}
+
+
+/* ============================================================
+   TABLET
+   ============================================================ */
+
+@media (max-width: 1024px) {
+
+  .pos-promo-entry {
+    grid-template-columns:
+      minmax(150px, 1fr)
+      auto
+      auto;
+
+    gap: 8px;
+  }
+
+  .pos-promo-entry .search,
+  .pos-promo-entry .btn {
+    min-height: 44px;
+  }
+
+  .pos-promo-entry .btn {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
+
+/* ============================================================
+   PHONE
+   ============================================================ */
+
+@media (max-width: 600px) {
+
+  .pos-promo-entry {
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(0, 1fr);
+
+    gap: 8px;
+  }
+
+  /*
+   * Promo input occupies the whole first row.
+   */
+  .pos-promo-entry .search {
+    grid-column: 1 / -1;
+
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+
+    /*
+     * 16px prevents unwanted automatic zoom
+     * on some mobile browsers.
+     */
+    font-size: 16px;
+  }
+
+  /*
+   * Apply + Remove become two large
+   * touch-friendly buttons.
+   */
+  .pos-promo-entry .btn {
+    width: 100%;
+    min-height: 46px;
+
+    padding: 10px 12px;
+
+    justify-content: center;
+  }
+
+  /*
+   * If only the Apply button exists,
+   * let it use the complete second row.
+   */
+  .pos-promo-entry .btn:only-of-type {
+    grid-column: 1 / -1;
+  }
+}
+
+
+/* ============================================================
+   VERY SMALL PHONES
+   ============================================================ */
+
+@media (max-width: 380px) {
+
+  .pos-promo-entry {
+    grid-template-columns: 1fr;
+  }
+
+  .pos-promo-entry .search,
+  .pos-promo-entry .btn,
+  .pos-promo-entry .btn:only-of-type {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .pos-promo-entry .btn {
+    min-height: 48px;
+  }
+}
+
+/* ============================================================
+   PROMOTION V2 — MODAL FORM
+   Desktop / Tablet / Phone
+   ============================================================ */
+
+.form-section {
+  padding: 0 0 22px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.form-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.form-section-title {
+  margin-bottom: 16px;
+
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+
+  color: var(--primary);
+}
+
+
+/* ------------------------------------------------------------
+   Form grid
+   ------------------------------------------------------------ */
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 1fr);
+
+  gap: 18px 24px;
+}
+
+.form-section > label,
+.form-grid-2 > label {
+  display: flex;
+  flex-direction: column;
+
+  gap: 6px;
+
+  min-width: 0;
+}
+
+.form-section > label {
+  margin-top: 18px;
+}
+
+
+/* ------------------------------------------------------------
+   Labels
+   ------------------------------------------------------------ */
+
+.form-section label > span,
+.form-label {
+  display: block;
+
+  font-size: 13px;
+  font-weight: 600;
+
+  color: var(--text);
+}
+
+.form-label {
+  margin-bottom: 7px;
+}
+
+
+/* ------------------------------------------------------------
+   Inputs / Select / Textarea
+   ------------------------------------------------------------ */
+
+.form-section input[type="text"],
+.form-section input[type="number"],
+.form-section input[type="datetime-local"],
+.form-section select,
+.form-section textarea {
+  display: block;
+
+  width: 100%;
+  min-width: 0;
+
+  padding: 10px 12px;
+
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+
+  background: #fff;
+  color: var(--text);
+
+  font-family: inherit;
+  font-size: 14px;
+
+  transition:
+    border-color .15s ease,
+    box-shadow .15s ease;
+}
+
+.form-section textarea {
+  min-height: 86px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.form-section input:focus,
+.form-section select:focus,
+.form-section textarea:focus {
+  outline: none;
+
+  border-color: var(--primary);
+
+  box-shadow:
+    0 0 0 3px
+    color-mix(
+      in srgb,
+      var(--primary) 14%,
+      transparent
+    );
+}
+
+
+/* ------------------------------------------------------------
+   Placeholder
+   ------------------------------------------------------------ */
+
+.form-section input::placeholder,
+.form-section textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+
+/* ------------------------------------------------------------
+   Helper text
+   ------------------------------------------------------------ */
+
+.form-section label > small,
+.form-section > div > small,
+.form-grid-2 > div > small {
+  display: block;
+
+  margin-top: 2px;
+
+  color: var(--text-soft);
+
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+
+/* ------------------------------------------------------------
+   Checkbox cards
+   ------------------------------------------------------------ */
+
+.check-grid {
+  display: flex;
+  flex-wrap: wrap;
+
+  gap: 10px;
+}
+
+.check-card {
+  display: flex;
+  align-items: flex-start;
+
+  gap: 9px;
+
+  padding: 10px 12px;
+
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+
+  background: #fff;
+
+  cursor: pointer;
+
+  transition:
+    border-color .15s ease,
+    background .15s ease;
+}
+
+.check-card:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.check-card input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+
+  margin-top: 1px;
+
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.check-card > span {
+  display: flex;
+  flex-direction: column;
+
+  gap: 2px;
+
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.check-card > span b {
+  font-size: 13px;
+}
+
+.check-card > span small {
+  color: var(--text-soft);
+
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+
+/* ------------------------------------------------------------
+   Existing Promotion summary
+   ------------------------------------------------------------ */
+
+.promo-edit-summary {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+
+  gap: 12px;
+
+  margin-top: 20px;
+}
+
+.promo-edit-summary > div {
+  padding: 13px 14px;
+
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+
+  background: var(--surface-alt);
+}
+
+.promo-edit-summary span {
+  display: block;
+
+  margin-bottom: 4px;
+
+  color: var(--text-soft);
+
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.promo-edit-summary b {
+  display: block;
+
+  font-size: 14px;
+  color: var(--text);
+}
+
+
+/* ============================================================
+   PROMOTION MODAL — TABLET
+   ============================================================ */
+
+@media (max-width: 1024px) {
+
+  .form-grid-2 {
+    gap: 16px 18px;
+  }
+
+  .form-section input[type="text"],
+  .form-section input[type="number"],
+  .form-section input[type="datetime-local"],
+  .form-section select {
+    min-height: 44px;
+  }
+
+  .check-card {
+    min-height: 44px;
+  }
+}
+
+
+/* ============================================================
+   PROMOTION MODAL — PHONE
+   ============================================================ */
+
+@media (max-width: 600px) {
+
+  .form-section {
+    padding-bottom: 18px;
+    margin-bottom: 18px;
+  }
+
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .form-section > label {
+    margin-top: 16px;
+  }
+
+  .form-section input[type="text"],
+  .form-section input[type="number"],
+  .form-section input[type="datetime-local"],
+  .form-section select,
+  .form-section textarea {
+    min-height: 46px;
+
+    /*
+     * Prevent automatic zoom on some
+     * mobile browsers.
+     */
+    font-size: 16px;
+  }
+
+  .form-section textarea {
+    min-height: 100px;
+  }
+
+  .check-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .check-card {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .promo-edit-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-foot {
+    flex-wrap: wrap;
+  }
+
+  .modal-foot .btn {
+    min-height: 44px;
+  }
+}
+
+
+/* ============================================================
+   PROMOTION MODAL — VERY SMALL PHONE
+   ============================================================ */
+
+@media (max-width: 380px) {
+
+  .modal-body {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .modal-head {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .modal-foot {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .modal-foot .btn {
+    flex: 1;
+    justify-content: center;
+  }
+}
