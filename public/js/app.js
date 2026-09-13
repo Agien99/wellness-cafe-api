@@ -1692,7 +1692,7 @@ VIEWS.pos = async (root) => {
           const amt =
             +$('#amtRcv').value;
 
-          if (amt < total) {
+          if (r2(amt) < r2(total)) {
             toast(
               'Insufficient amount',
               'error'
@@ -1764,6 +1764,7 @@ VIEWS.pos = async (root) => {
 
       clearAppliedPromo();
 
+      pos.customerId = 8;
       pos.tableId = null;
 
       state.customers =
