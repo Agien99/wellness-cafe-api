@@ -192,14 +192,27 @@ class OrderService
             }
 
             /*
-             * Existing member discount + promotion discount
-             * are still combined for now.
-             *
-             * Later Dynamic Loyalty will control whether
-             * these are allowed to stack.
-             */
+            * Promotion stackability.
+            *
+            * Stackable promotion:
+            *   membership discount + promotion discount
+            *
+            * Non-stackable promotion:
+            *   use whichever discount gives the customer
+            *   the greater saving.
+            */
+            if ($promotion && !$promotion->stackable) {
+                $totalDiscount = max(
+                    $memberDiscount,
+                    $promoDiscount
+                );
+            } else {
+                $totalDiscount =
+                    $memberDiscount + $promoDiscount;
+            }
+
             $totalDiscount = round(
-                $memberDiscount + $promoDiscount,
+                $totalDiscount,
                 2
             );
 
