@@ -476,4 +476,203 @@ class PromotionV2Test extends TestCase
             ]
         );
     }
+
+    public function test_stackable_promotion_combines_with_membership_discount(): void
+
+    {
+        $customer = $this->createCustomer();
+
+        $customer->update([
+            'membership' => 'Gold',
+        ]);
+
+        $product = $this->createProduct(100);
+
+        $promotion = $this->createPromotion([
+            'value' => 10,
+            'stackable' => true,
+        ]);
+
+        $service = app(OrderService::class);
+
+        $order = $service->create([
+            'items' => [
+                [
+                    'product_id' => $product->id,
+                    'qty' => 1,
+                ],
+            ],
+            'customer_id' => $customer->id,
+            'channel' => 'pos',
+            'promo_code' => $promotion->code,
+            'payment' => [
+                'method' => 'cash',
+            ],
+        ]);
+
+        $this->assertSame(
+            8.0,
+            (float) $order->member_discount
+        );
+
+        $this->assertSame(
+            10.0,
+            (float) $order->promo_discount
+        );
+
+        $this->assertSame(
+            18.0,
+            (float) $order->discount
+        );
+    }
+
+    public function test_non_stackable_promotion_uses_promo_when_promo_is_better(): void
+    {
+        $customer = $this->createCustomer();
+
+        $customer->update([
+            'membership' => 'Gold',
+        ]);
+
+        $product = $this->createProduct(100);
+
+        $promotion = $this->createPromotion([
+            'value' => 10,
+            'stackable' => false,
+        ]);
+
+        $service = app(OrderService::class);
+
+        $order = $service->create([
+            'items' => [
+                [
+                    'product_id' => $product->id,
+                    'qty' => 1,
+                ],
+            ],
+            'customer_id' => $customer->id,
+            'channel' => 'pos',
+            'promo_code' => $promotion->code,
+            'payment' => [
+                'method' => 'cash',
+            ],
+        ]);
+
+        $this->assertSame(
+            8.0,
+            (float) $order->member_discount
+        );
+
+        $this->assertSame(
+            10.0,
+            (float) $order->promo_discount
+        );
+
+        $this->assertSame(
+            10.0,
+            (float) $order->discount
+        );
+    }
+
+    public function test_non_stackable_promotion_uses_membership_when_membership_is_better(): void
+    {
+        $customer = $this->createCustomer();
+
+        $customer->update([
+            'membership' => 'Platinum',
+        ]);
+
+        $product = $this->createProduct(100);
+
+        $promotion = $this->createPromotion([
+            'value' => 10,
+            'stackable' => false,
+        ]);
+
+        $service = app(OrderService::class);
+
+        $order = $service->create([
+            'items' => [
+                [
+                    'product_id' => $product->id,
+                    'qty' => 1,
+                ],
+            ],
+            'customer_id' => $customer->id,
+            'channel' => 'pos',
+            'promo_code' => $promotion->code,
+            'payment' => [
+                'method' => 'cash',
+            ],
+        ]);
+
+        $this->assertSame(
+            12.0,
+            (float) $order->member_discount
+        );
+
+        $this->assertSame(
+            10.0,
+            (float) $order->promo_discount
+        );
+
+        $this->assertSame(
+            12.0,
+            (float) $order->discount
+        );
+    }
+
+    public function test_non_stackable_promotion_works_normally_without_membership_discount(): void
+    {
+        $walkIn = new Customer();
+
+        $walkIn->id = 8;
+        $walkIn->name = 'Walk-in Customer';
+        $walkIn->phone = null;
+        $walkIn->email = null;
+        $walkIn->membership = 'None';
+        $walkIn->points = 0;
+        $walkIn->total_spent = 0;
+        $walkIn->joined_at = now()->toDateString();
+
+        $walkIn->save();
+
+        $product = $this->createProduct(100);
+
+        $promotion = $this->createPromotion([
+            'value' => 10,
+            'stackable' => false,
+        ]);
+
+        $service = app(OrderService::class);
+
+        $order = $service->create([
+            'items' => [
+                [
+                    'product_id' => $product->id,
+                    'qty' => 1,
+                ],
+            ],
+            'channel' => 'pos',
+            'promo_code' => $promotion->code,
+            'payment' => [
+                'method' => 'cash',
+            ],
+        ]);
+
+        $this->assertSame(
+            0.0,
+            (float) $order->member_discount
+        );
+
+        $this->assertSame(
+            10.0,
+            (float) $order->promo_discount
+        );
+
+        $this->assertSame(
+            10.0,
+            (float) $order->discount
+        );
+    }
 }
