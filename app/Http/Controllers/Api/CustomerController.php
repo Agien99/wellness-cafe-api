@@ -7,6 +7,7 @@ use App\Models\AuditLog;
 use App\Models\Customer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class CustomerController extends Controller
 {
@@ -38,7 +39,11 @@ class CustomerController extends Controller
             'name'       => ['required', 'string', 'max:255'],
             'phone'      => ['nullable', 'string', 'max:32'],
             'email'      => ['nullable', 'email', 'max:255'],
-            'membership' => ['nullable', 'in:None,Bronze,Silver,Gold,Platinum'],
+            'membership' => [
+                'nullable',
+                Rule::exists('loyalty_tiers', 'name')
+                    ->where('active', true),
+            ],
         ]);
         $data['membership'] = $data['membership'] ?? 'Bronze';
         $data['joined_at'] = now()->toDateString();
@@ -55,7 +60,11 @@ class CustomerController extends Controller
             'name'       => ['sometimes', 'required', 'string', 'max:255'],
             'phone'      => ['nullable', 'string', 'max:32'],
             'email'      => ['nullable', 'email', 'max:255'],
-            'membership' => ['nullable', 'in:None,Bronze,Silver,Gold,Platinum'],
+            'membership' => [
+                'nullable',
+                Rule::exists('loyalty_tiers', 'name')
+                    ->where('active', true),
+            ],
             'points'     => ['nullable', 'integer', 'min:0'],
         ]);
         $customer->update($data);

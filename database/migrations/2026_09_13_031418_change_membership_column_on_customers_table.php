@@ -1,31 +1,32 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement("
-            ALTER TABLE customers
-            MODIFY membership VARCHAR(255)
-            NOT NULL DEFAULT 'Bronze'
-        ");
+        Schema::table('customers', function (Blueprint $table) {
+            $table->string('membership')
+                ->default('Bronze')
+                ->change();
+        });
     }
 
     public function down(): void
     {
-        DB::statement("
-            ALTER TABLE customers
-            MODIFY membership ENUM(
+        Schema::table('customers', function (Blueprint $table) {
+            $table->enum('membership', [
                 'None',
                 'Bronze',
                 'Silver',
                 'Gold',
-                'Platinum'
-            )
-            NOT NULL DEFAULT 'Bronze'
-        ");
+                'Platinum',
+            ])
+                ->default('Bronze')
+                ->change();
+        });
     }
 };
