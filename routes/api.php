@@ -34,9 +34,10 @@ Route::get('/health', fn () => response()->json([
 Route::post('/login', [AuthController::class, 'login']);
 
 // Public (for guest QR ordering — customers don't log in)
-Route::get ('/public/menu',   [\App\Http\Controllers\Api\PublicController::class, 'menu']);
-Route::get ('/public/tables', [\App\Http\Controllers\Api\PublicController::class, 'tables']);
-Route::post('/public/orders', [\App\Http\Controllers\Api\PublicController::class, 'createOrder']);
+Route::get ('/public/menu',             [\App\Http\Controllers\Api\PublicController::class, 'menu']);
+Route::get ('/public/tables',           [\App\Http\Controllers\Api\PublicController::class, 'tables']);
+Route::post('/public/orders',           [\App\Http\Controllers\Api\PublicController::class, 'createOrder']);
+Route::post('/public/customer/lookup',  [\App\Http\Controllers\Api\PublicController::class, 'lookupCustomer']);
 Route::get ('/public/orders/{orderNo}/status',      [\App\Http\Controllers\Api\PublicController::class, 'orderStatus']);
 Route::get ('/public/orders/{orderNo}/duitnow-qr',  [\App\Http\Controllers\Api\PublicController::class, 'orderDuitnowQr']);
 
