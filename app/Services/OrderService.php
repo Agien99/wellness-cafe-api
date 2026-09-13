@@ -15,6 +15,7 @@ use App\Models\StockMovement;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use App\Models\LoyaltyTier;
 
 /**
  * OrderService
@@ -789,19 +790,18 @@ class OrderService
     private function resolveTier(
         float $totalSpent
     ): string {
-        if ($totalSpent >= 800) {
-            return 'Platinum';
-        }
+        $tier = LoyaltyTier::query()
+            ->where('active', true)
+            ->where(
+                'minimum_spend',
+                '<=',
+                $totalSpent
+            )
+            ->orderByDesc('minimum_spend')
+            ->orderByDesc('sort_order')
+            ->first();
 
-        if ($totalSpent >= 300) {
-            return 'Gold';
-        }
-
-        if ($totalSpent >= 100) {
-            return 'Silver';
-        }
-
-        return 'Bronze';
+        return $tier?->name ?? 'Bronze';
     }
 
     /**
