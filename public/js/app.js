@@ -356,6 +356,14 @@ let pos = {
 VIEWS.pos = async (root) => {
   if (pos.categoryId === null) pos.categoryId = state.categories[0]?.id;
 
+  const selectedCustomer =
+  state.customers.find(
+    c => c.id === pos.customerId
+  ) ||
+  state.customers.find(
+    c => c.id === 8
+  );
+
   root.innerHTML = `
     <div class="pos-shell">
 
@@ -424,14 +432,64 @@ VIEWS.pos = async (root) => {
 
         <div class="pos-order-meta">
           <div class="pos-field pos-field-full">
-            <label for="custSel">Customer</label>
-            <select id="custSel">
-              ${state.customers.map(c=>`
-                <option value="${c.id}" ${c.id===pos.customerId?'selected':''}>
-                  ${c.name}${c.membership!=='None'?' ('+c.membership+')':''}
-                </option>
-              `).join('')}
-            </select>
+            <label>Customer</label>
+
+            <div
+              style="
+                border:1.5px solid var(--border);
+                border-radius:var(--radius);
+                padding:12px;
+                background:#fff;
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:12px;
+              "
+            >
+              <div>
+                <div style="font-weight:700">
+                  ${selectedCustomer?.name || 'Walk-in Customer'}
+                </div>
+
+                ${
+                  selectedCustomer?.id === 8
+                    ? `
+                      <div
+                        style="
+                          font-size:12px;
+                          color:var(--text-soft);
+                          margin-top:3px;
+                        "
+                      >
+                        No loyalty benefits
+                      </div>
+                    `
+                    : `
+                      <div
+                        style="
+                          font-size:12px;
+                          color:var(--text-soft);
+                          margin-top:3px;
+                        "
+                      >
+                        ${selectedCustomer?.membership || 'Bronze'}
+                        Member
+                        ·
+                        ${selectedCustomer?.points || 0}
+                        pts
+                      </div>
+                    `
+                }
+              </div>
+
+              <button
+                class="btn sm"
+                id="changePosCustomer"
+                type="button"
+              >
+                Change
+              </button>
+            </div>
           </div>
 
           <div class="pos-meta-grid">
@@ -565,18 +623,11 @@ VIEWS.pos = async (root) => {
     );
   }
 
-  function clearAppliedPromo() {
-    pos.promoCode = null;
-    pos.promoValidation = null;
-  }
-
-  $('#custSel').addEventListener('change', e => {
-    pos.customerId = +e.target.value;
-
-    clearAppliedPromo();
-
-    renderCart();
-  });
+  $('#changePosCustomer')
+  ?.addEventListener(
+    'click',
+    () => openPosCustomerPicker()
+  );
 
   $('#chanSel').addEventListener('change', e => {
     pos.channel = e.target.value;
@@ -974,13 +1025,21 @@ VIEWS.pos = async (root) => {
       );
 
     const tier =
-      state.membershipTiers.find(
-        t => t.name === customer?.membership
+      state.loyaltyTiers.find(
+        t =>
+          t.name === customer?.membership &&
+          t.active
       );
 
     const memberDisc =
       tier
-        ? sub * tier.discount
+        ? r2(
+            sub *
+            (
+              num(tier.discount_percentage) /
+              100
+            )
+          )
         : 0;
 
     const promoDisc =
@@ -1044,7 +1103,7 @@ VIEWS.pos = async (root) => {
             <div class="sum-line discount-line">
               <span>
                 Member discount
-                (${(tier.discount*100).toFixed(0)}%)
+                (${num(tier.discount_percentage).toFixed(0)}%)
                 ${
                   promoDisc > 0 &&
                   pos.promoValidation?.stackable === false
@@ -1989,6 +2048,183 @@ VIEWS.pos = async (root) => {
   }
 };
 
+function clearAppliedPromo() {
+  pos.promoCode = null;
+  pos.promoValidation = null;
+}
+
+function openPosCustomerPicker() {
+  const customers =
+    [...state.customers].sort((a, b) => {
+      if (a.id === 8) return -1;
+      if (b.id === 8) return 1;
+
+      return a.name.localeCompare(b.name);
+    });
+
+  openModal(`
+    <div class="modal-head">
+      <h3>Select Customer</h3>
+
+      <button
+        class="close-btn"
+        onclick="closeModal()"
+      >
+        ×
+      </button>
+    </div>
+
+    <div class="modal-body">
+
+      <div
+        style="
+          display:flex;
+          justify-content:flex-end;
+          margin-bottom:12px;
+        "
+      >
+        <button
+          type="button"
+          class="btn primary"
+          id="newPosCustomer"
+        >
+          + New Customer
+        </button>
+      </div>
+
+      <div class="field">
+        <label>Search</label>
+
+        <input
+          id="posCustomerSearch"
+          placeholder="Search name, phone or email..."
+          autocomplete="off"
+        >
+      </div>
+
+      <div
+        id="posCustomerList"
+        style="
+          display:flex;
+          flex-direction:column;
+          gap:8px;
+          max-height:55vh;
+          overflow-y:auto;
+        "
+      ></div>
+    </div>
+  `);
+
+  $('#newPosCustomer')
+  ?.addEventListener(
+    'click',
+    () => {
+      openCustomerForm(
+        null,
+        {
+          returnToPos: true,
+        }
+      );
+    }
+  );
+
+  const draw = () => {
+    const q =
+      ($('#posCustomerSearch')?.value || '')
+        .trim()
+        .toLowerCase();
+
+    const filtered =
+      customers.filter(c => {
+        return (
+          c.name?.toLowerCase().includes(q) ||
+          c.phone?.toLowerCase().includes(q) ||
+          c.email?.toLowerCase().includes(q)
+        );
+      });
+
+    $('#posCustomerList').innerHTML =
+      filtered.map(c => `
+        <button
+          type="button"
+          class="btn pos-customer-option"
+          data-customer-id="${c.id}"
+          style="
+            width:100%;
+            justify-content:space-between;
+            text-align:left;
+            padding:12px 14px;
+          "
+        >
+          <span>
+            <b>${c.name}</b>
+
+            <small
+              style="
+                display:block;
+                margin-top:3px;
+                color:var(--text-soft);
+              "
+            >
+              ${
+                c.id === 8
+                  ? 'Walk-in · No loyalty'
+                  : `${c.membership} Member · ${c.points || 0} pts`
+              }
+            </small>
+          </span>
+
+          ${
+            c.id === pos.customerId
+              ? '<span class="badge badge-success">Selected</span>'
+              : ''
+          }
+        </button>
+      `).join('') ||
+      `
+        <div class="empty">
+          No customers found.
+        </div>
+      `;
+  };
+
+  $('#posCustomerSearch')
+    ?.addEventListener(
+      'input',
+      draw
+    );
+
+  $('#posCustomerList')
+    ?.addEventListener(
+      'click',
+      e => {
+        const btn =
+          e.target.closest(
+            '.pos-customer-option'
+          );
+
+        if (!btn) {
+          return;
+        }
+
+        pos.customerId =
+          Number(
+            btn.dataset.customerId
+          );
+
+        clearAppliedPromo();
+
+        closeModal();
+
+        VIEWS.pos(
+          $('#content')
+        );
+      }
+    );
+
+  draw();
+}
+
 /* ===== KDS (auto-refreshing) ===== */
 let kdsPollTimer = null;
 let kdsTickTimer = null;
@@ -2910,7 +3146,10 @@ VIEWS.customer = async (root) => {
   $('#custSearch').addEventListener('input', draw);
 };
 
-async function openCustomerForm(id) {
+async function openCustomerForm(
+  id,
+  options = {}
+) {
   const isNew = !id;
   const c = isNew
     ? { name:'', phone:'', email:'', membership:'Bronze', points: 0 }
@@ -2965,10 +3204,52 @@ async function openCustomerForm(id) {
     if (!name) { toast('Name required', 'error'); return; }
     const body = { name, phone: $('#cPhone').value, email: $('#cEmail').value, membership: $('#cTier').value, points: +$('#cPts').value };
     try {
-      if (isNew) await API.post('/customers', body);
-      else       await API.put('/customers/' + id, body);
-      toast('Saved'); closeModal(); route('customer');
-    } catch (err) {
+      let savedCustomer;
+
+      if (isNew) {
+        savedCustomer =
+          await API.post(
+            '/customers',
+            body
+          );
+      }
+      else {
+        savedCustomer =
+          await API.put(
+            '/customers/' + id,
+            body
+          );
+      }
+
+      state.customers =
+        await API.get(
+          '/customers'
+        );
+
+      toast('Saved');
+
+      closeModal();
+
+      if (
+        options.returnToPos &&
+        isNew &&
+        savedCustomer?.id
+      ) {
+        pos.customerId =
+          Number(savedCustomer.id);
+
+        clearAppliedPromo();
+
+        VIEWS.pos(
+          $('#content')
+        );
+
+        return;
+      }
+
+      route('customer');
+    }
+    catch (err) {
       toast(err.payload?.message || 'Save failed', 'error');
     }
   });
