@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\TableController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\LoyaltyTierController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -78,6 +79,32 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get   ('/customers/{customer}', [CustomerController::class, 'show']);
     Route::put   ('/customers/{customer}', [CustomerController::class, 'update']);
     Route::delete('/customers/{customer}', [CustomerController::class, 'destroy']);
+
+    // -- Loyalty Tiers --
+    Route::get(
+        '/loyalty-tiers',
+        [LoyaltyTierController::class, 'index']
+    );
+
+    Route::post(
+        '/loyalty-tiers',
+        [LoyaltyTierController::class, 'store']
+    );
+
+    Route::get(
+        '/loyalty-tiers/{loyaltyTier}',
+        [LoyaltyTierController::class, 'show']
+    );
+
+    Route::put(
+        '/loyalty-tiers/{loyaltyTier}',
+        [LoyaltyTierController::class, 'update']
+    );
+
+    Route::delete(
+        '/loyalty-tiers/{loyaltyTier}',
+        [LoyaltyTierController::class, 'destroy']
+    );
 
     // -- Promotions --
     Route::get   ('/promotions',                [PromotionController::class, 'index']);
