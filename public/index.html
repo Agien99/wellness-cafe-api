@@ -98,6 +98,54 @@
     </div>
 
     <div id="menuArea" class="hidden">
+
+      <div
+        style="
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          gap:12px;
+          margin:14px 0 10px;
+          padding:12px 14px;
+          background:#fff;
+          border:1px solid #e5e7eb;
+          border-radius:12px;
+        "
+      >
+        <div>
+          <div
+            style="
+              font-size:11px;
+              color:#64748b;
+              text-transform:uppercase;
+              font-weight:700;
+              letter-spacing:.05em;
+            "
+          >
+            Current Order
+          </div>
+
+          <div
+            id="menuOrderLocation"
+            style="
+              margin-top:3px;
+              font-weight:700;
+              font-size:14px;
+            "
+          >
+            —
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="btn sm"
+          id="changeTableBtn"
+        >
+          Change
+        </button>
+      </div>
+
       <div class="qr-cat-tabs" id="qrCatTabs"></div>
       <div class="qr-product-list" id="qrProducts"></div>
     </div>
@@ -218,11 +266,50 @@ $('#takeaway').addEventListener('click', e => {
 function startMenu() {
   $('#tablePicker').classList.add('hidden');
   $('#menuArea').classList.remove('hidden');
-  $('#tableInfo').textContent = mode==='dinein'
-    ? `📍 Ordering for Table ${tables.find(t=>t.id===tableId).name}`
-    : '📦 Takeaway order';
-  renderCats(); renderProducts();
+
+  const locationText =
+    mode === 'dinein'
+      ? `Table ${tables.find(t => t.id === tableId)?.name || ''}`
+      : 'Takeaway';
+
+  $('#tableInfo').textContent =
+    mode === 'dinein'
+      ? `📍 Ordering for ${locationText}`
+      : '📦 Takeaway order';
+
+  $('#menuOrderLocation').textContent =
+    mode === 'dinein'
+      ? `📍 ${locationText}`
+      : '📦 Takeaway';
+
+  renderCats();
+  renderProducts();
 }
+
+$('#changeTableBtn')
+  ?.addEventListener('click', () => {
+    if (cart.length > 0) {
+      const confirmed = confirm(
+        'Changing table will clear your current cart. Continue?'
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      cart = [];
+      refreshCartBar();
+    }
+
+    tableId = null;
+    mode = null;
+
+    $('#menuArea').classList.add('hidden');
+    $('#tablePicker').classList.remove('hidden');
+
+    $('#tableInfo').textContent =
+      '📍 Choose your table below to start ordering';
+  });
 
 function renderCats() {
   $('#qrCatTabs').innerHTML = categories.filter(c => c.id !== 6).map(c =>
