@@ -983,8 +983,26 @@ VIEWS.pos = async (root) => {
     const promoDisc =
       computePromoDiscount(sub);
 
-    const totalDisc =
-      memberDisc + promoDisc;
+    let totalDisc;
+
+      if (
+        promoDisc > 0 &&
+        pos.promoValidation &&
+        pos.promoValidation.stackable === false
+      ) {
+        totalDisc = Math.max(
+          memberDisc,
+          promoDisc
+        );
+      } else {
+        totalDisc =
+          memberDisc + promoDisc;
+      }
+
+      totalDisc = Math.min(
+        totalDisc,
+        sub
+      );
 
     const taxBase =
       Math.max(
@@ -1013,12 +1031,23 @@ VIEWS.pos = async (root) => {
       </div>
 
       ${
-        memberDisc > 0
+        memberDisc > 0 &&
+        (
+          promoDisc === 0 ||
+          pos.promoValidation?.stackable !== false ||
+          memberDisc >= promoDisc
+        )
           ? `
             <div class="sum-line discount-line">
               <span>
                 Member discount
                 (${(tier.discount*100).toFixed(0)}%)
+                ${
+                  promoDisc > 0 &&
+                  pos.promoValidation?.stackable === false
+                    ? '<small class="text-muted"> · Applied</small>'
+                    : ''
+                }
               </span>
 
               <span>
@@ -1030,15 +1059,47 @@ VIEWS.pos = async (root) => {
       }
 
       ${
-        promoDisc > 0
+        promoDisc > 0 &&
+        (
+          pos.promoValidation?.stackable !== false ||
+          promoDisc > memberDisc
+        )
           ? `
             <div class="sum-line discount-line">
               <span>
                 Promo (${pos.promoCode})
+                ${
+                  memberDisc > 0 &&
+                  pos.promoValidation?.stackable === false
+                    ? '<small class="text-muted"> · Applied</small>'
+                    : ''
+                }
               </span>
 
               <span>
                 −${money(promoDisc)}
+              </span>
+            </div>
+          `
+          : ''
+      }
+
+      ${
+        memberDisc > 0 &&
+        promoDisc > 0 &&
+        pos.promoValidation?.stackable === false
+          ? `
+            <div class="sum-line">
+              <span class="text-muted">
+                ${
+                  memberDisc >= promoDisc
+                    ? `Promo ${pos.promoCode} not combined`
+                    : 'Member discount not combined'
+                }
+              </span>
+
+              <span class="text-muted">
+                Best discount applied
               </span>
             </div>
           `
@@ -1163,6 +1224,90 @@ VIEWS.pos = async (root) => {
           <b>
             ${pos.channel.toUpperCase()}
           </b>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="cart-summary">
+
+            <div class="sum-line">
+              <span>Subtotal</span>
+              <span>${money(pos._calc.sub)}</span>
+            </div>
+
+            ${
+              pos._calc.memberDisc > 0 &&
+              (
+                pos._calc.promoDisc === 0 ||
+                pos.promoValidation?.stackable !== false ||
+                pos._calc.memberDisc >= pos._calc.promoDisc
+              )
+                ? `
+                  <div class="sum-line discount-line">
+                    <span>
+                      Member discount
+                    </span>
+
+                    <span>
+                      −${money(pos._calc.memberDisc)}
+                    </span>
+                  </div>
+                `
+                : ''
+            }
+
+            ${
+              pos._calc.promoDisc > 0 &&
+              (
+                pos.promoValidation?.stackable !== false ||
+                pos._calc.promoDisc > pos._calc.memberDisc
+              )
+                ? `
+                  <div class="sum-line discount-line">
+                    <span>
+                      Promo (${pos.promoCode})
+                    </span>
+
+                    <span>
+                      −${money(pos._calc.promoDisc)}
+                    </span>
+                  </div>
+                `
+                : ''
+            }
+
+            ${
+              pos._calc.memberDisc > 0 &&
+              pos._calc.promoDisc > 0 &&
+              pos.promoValidation?.stackable === false
+                ? `
+                  <div class="sum-line">
+                    <span class="text-muted">
+                      Best discount applied
+                    </span>
+
+                    <span class="text-muted">
+                      ${
+                        pos._calc.promoDisc > pos._calc.memberDisc
+                          ? 'Promotion'
+                          : 'Membership'
+                      }
+                    </span>
+                  </div>
+                `
+                : ''
+            }
+
+            <div class="sum-line">
+              <span>Tax</span>
+              <span>${money(pos._calc.tax)}</span>
+            </div>
+
+            <div class="sum-line total">
+              <span>Total</span>
+              <span>${money(pos._calc.total)}</span>
+            </div>
+
+          </div>
         </div>
 
         <div class="section-title">
@@ -1406,6 +1551,9 @@ VIEWS.pos = async (root) => {
             discount:
               num(r.discount),
 
+            stackable:
+              r.promo?.stackable ?? false,
+
             subtotal:
               r2(sub),
 
@@ -1414,9 +1562,6 @@ VIEWS.pos = async (root) => {
 
             channel:
               pos.channel,
-
-            promo:
-              r.promo || null,
           };
 
           toast(
