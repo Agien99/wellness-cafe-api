@@ -27,12 +27,7 @@ const state = {
   customers: [],
   tables: [],
   promotions: [],
-  membershipTiers: [
-    { name: 'Bronze',   minSpend: 0,    discount: 0,    benefit: '1 pt per RM1' },
-    { name: 'Silver',   minSpend: 100,  discount: 0.05, benefit: '5% off + 1.2x pts' },
-    { name: 'Gold',     minSpend: 300,  discount: 0.08, benefit: '8% off + 1.5x pts' },
-    { name: 'Platinum', minSpend: 800,  discount: 0.12, benefit: '12% off + 2x pts' },
-  ],
+  loyaltyTiers: [],
 };
 
 const currentUser = state.user;
@@ -99,17 +94,25 @@ function num(v) { return v === null || v === undefined ? 0 : +v; }
 // ---------- Initial data load ---------- //
 async function loadInitial() {
   try {
-    const [menu, tables, customers, promos] = await Promise.all([
+    const [
+      menu,
+      tables,
+      customers,
+      promos,
+      loyaltyTiers,
+    ] = await Promise.all([
       API.get('/menu'),
       API.get('/tables'),
       API.get('/customers'),
       API.get('/promotions'),
+      API.get('/loyalty-tiers'),
     ]);
     state.categories = menu.categories;
     state.products   = menu.products.map(p => ({ ...p, price: num(p.price), cost: num(p.cost) }));
     state.tables     = tables;
     state.customers  = customers;
     state.promotions = promos;
+    state.loyaltyTiers = loyaltyTiers;
   } catch (err) {
     console.error('loadInitial failed', err);
     toast('Could not load initial data. ' + (err.message || ''), 'error');
@@ -2626,7 +2629,7 @@ async function openStocktake() {
 VIEWS.customer = async (root) => {
   const customers = await API.get('/customers');
   state.customers = customers;
-  const tiers = state.membershipTiers;
+  const tiers = state.loyaltyTiers;
   root.innerHTML = `
     <div class="stat-row">
       ${tiers.map(t=>{
@@ -2641,12 +2644,250 @@ VIEWS.customer = async (root) => {
       <div id="custTable"></div>
     </div>
     <div class="card">
-      <div class="card-header"><h3>Loyalty Tier Benefits</h3></div>
-      <table class="data">
-        <thead><tr><th>Tier</th><th>Min Spend</th><th>Discount</th><th>Benefit</th></tr></thead>
-        <tbody>${tiers.map(t=>`<tr><td><b>${t.name}</b></td><td>${money(t.minSpend)}</td><td>${(t.discount*100).toFixed(0)}%</td><td>${t.benefit}</td></tr>`).join('')}</tbody>
-      </table>
+
+      <div
+        class="card-header"
+        style="align-items:flex-start"
+      >
+        <div>
+          <h3>
+            Loyalty Tier Benefits
+          </h3>
+
+          <small>
+            Membership levels are assigned automatically
+            based on customer spending.
+          </small>
+        </div>
+
+        <button
+          class="btn primary sm"
+          id="addLoyaltyTierBtn"
+        >
+          + Add Tier
+        </button>
+      </div>
+
+      <div style="overflow-x:auto">
+
+        <table class="data">
+
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>Min Spend</th>
+              <th>Discount</th>
+              <th>Points</th>
+              <th>Status</th>
+              <th class="text-right">
+                Actions
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+
+            ${tiers.map(t => `
+              <tr>
+
+                <td>
+                  <b>${t.name}</b>
+
+                  ${
+                    t.name === 'Bronze'
+                      ? `
+                        <span
+                          class="badge badge-bronze"
+                          style="margin-left:6px"
+                        >
+                          Base
+                        </span>
+                      `
+                      : ''
+                  }
+                </td>
+
+                <td>
+                  ${money(
+                    num(t.minimum_spend)
+                  )}
+                </td>
+
+                <td>
+                  ${
+                    num(
+                      t.discount_percentage
+                    ).toFixed(0)
+                  }%
+                </td>
+
+                <td>
+                  ${
+                    num(
+                      t.points_multiplier
+                    ).toFixed(1)
+                  }x
+                </td>
+
+                <td>
+                  <span
+                    class="badge ${
+                      t.active
+                        ? 'badge-success'
+                        : 'badge-none'
+                    }"
+                  >
+                    ${
+                      t.active
+                        ? 'Active'
+                        : 'Inactive'
+                    }
+                  </span>
+                </td>
+
+                <td class="text-right">
+
+                  <button
+                    class="btn sm loyalty-edit-btn"
+                    data-id="${t.id}"
+                  >
+                    Edit
+                  </button>
+
+                  ${
+                    t.name !== 'Bronze'
+                      ? `
+                        <button
+                          class="btn sm loyalty-toggle-btn"
+                          data-id="${t.id}"
+                        >
+                          ${
+                            t.active
+                              ? 'Disable'
+                              : 'Enable'
+                          }
+                        </button>
+
+                        <button
+                          class="btn sm danger loyalty-delete-btn"
+                          data-id="${t.id}"
+                        >
+                          Delete
+                        </button>
+                      `
+                      : ''
+                  }
+
+                </td>
+
+              </tr>
+            `).join('')}
+
+          </tbody>
+
+        </table>
+
+      </div>
+
     </div>`;
+
+    $('#addLoyaltyTierBtn')?.addEventListener(
+      'click',
+      () => openLoyaltyTierModal()
+    );
+
+    $$('.loyalty-edit-btn').forEach(btn => {
+      btn.addEventListener(
+        'click',
+        () => {
+          const tier = state.loyaltyTiers.find(
+            t => String(t.id) === btn.dataset.id
+          );
+
+          if (tier) {
+            openLoyaltyTierModal(tier);
+          }
+        }
+      );
+    });
+
+    $$('.loyalty-toggle-btn').forEach(btn => {
+      btn.addEventListener(
+        'click',
+        async () => {
+          const tier = state.loyaltyTiers.find(
+            t => String(t.id) === btn.dataset.id
+          );
+
+          if (!tier) {
+            return;
+          }
+
+          try {
+            await API.put(
+              `/loyalty-tiers/${tier.id}`,
+              {
+                active: !tier.active,
+              }
+            );
+
+            toast(
+              `${tier.name} tier ${
+                tier.active
+                  ? 'disabled'
+                  : 'enabled'
+              }.`
+            );
+
+            await refreshLoyaltyTiers();
+
+            route('customer');
+          } catch (err) {
+            showLoyaltyApiError(err);
+          }
+        }
+      );
+    });
+
+    $$('.loyalty-delete-btn').forEach(btn => {
+      btn.addEventListener(
+        'click',
+        async () => {
+          const tier = state.loyaltyTiers.find(
+            t => String(t.id) === btn.dataset.id
+          );
+
+          if (!tier) {
+            return;
+          }
+
+          const confirmed = confirm(
+            `Delete loyalty tier "${tier.name}"?\n\n` +
+            'Existing customers will be automatically reassigned.'
+          );
+
+          if (!confirmed) {
+            return;
+          }
+
+          try {
+            await API.delete(
+              `/loyalty-tiers/${tier.id}`
+            );
+
+            toast(
+              `${tier.name} tier deleted.`
+            );
+
+            await refreshLoyaltyTiers();
+
+            route('customer');
+          } catch (err) {
+            showLoyaltyApiError(err);
+          }
+        }
+      );
+    });
   const draw = () => {
     const q = $('#custSearch').value.toLowerCase();
     let rows = customers.filter(c=>c.id!==8);
@@ -2709,6 +2950,348 @@ async function deleteCustomer(id) {
   if (!confirm('Soft-delete this customer?')) return;
   try { await API.delete('/customers/' + id); toast('Deleted'); closeModal(); route('customer'); }
   catch (err) { toast(err.payload?.message || 'Delete failed', 'error'); }
+}
+
+async function refreshLoyaltyTiers() {
+  state.loyaltyTiers =
+    await API.get(
+      '/loyalty-tiers'
+    );
+}
+
+function showLoyaltyApiError(err) {
+  console.error(
+    'Loyalty tier error:',
+    err
+  );
+
+  if (
+    err.payload &&
+    err.payload.errors
+  ) {
+    const firstError =
+      Object.values(
+        err.payload.errors
+      )
+        .flat()
+        .find(Boolean);
+
+    toast(
+      firstError ||
+      err.message ||
+      'Unable to save loyalty tier.',
+      'error'
+    );
+
+    return;
+  }
+
+  toast(
+    err.message ||
+    'Unable to process loyalty tier.',
+    'error'
+  );
+}
+
+function openLoyaltyTierModal(
+  tier = null
+) {
+  const editing = !!tier;
+
+  const isBronze =
+    tier?.name === 'Bronze';
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h3>
+          ${
+            editing
+              ? 'Edit Loyalty Tier'
+              : 'Add Loyalty Tier'
+          }
+        </h3>
+
+        <small class="text-muted">
+          Configure spending threshold,
+          discount and points multiplier.
+        </small>
+      </div>
+
+      <button
+        type="button"
+        class="btn sm"
+        id="closeLoyaltyTierModal"
+      >
+        ✕
+      </button>
+    </div>
+
+    <form id="loyaltyTierForm">
+
+      <div class="modal-body">
+
+        <div class="field">
+          <label>
+            Tier Name
+          </label>
+
+          <input
+            type="text"
+            id="loyaltyTierName"
+            value="${tier?.name ?? ''}"
+            maxlength="100"
+            ${isBronze ? 'disabled' : ''}
+            required
+          >
+        </div>
+
+        <div class="grid-2">
+
+          <div class="field">
+            <label>
+              Minimum Spend (RM)
+            </label>
+
+            <input
+              type="number"
+              id="loyaltyTierMinSpend"
+              min="0"
+              step="0.01"
+              value="${
+                tier?.minimum_spend ?? 0
+              }"
+              ${isBronze ? 'disabled' : ''}
+              required
+            >
+          </div>
+
+          <div class="field">
+            <label>
+              Discount (%)
+            </label>
+
+            <input
+              type="number"
+              id="loyaltyTierDiscount"
+              min="0"
+              max="100"
+              step="0.01"
+              value="${
+                tier?.discount_percentage ?? 0
+              }"
+              required
+            >
+          </div>
+
+        </div>
+
+        <div class="grid-2">
+
+          <div class="field">
+            <label>
+              Points Multiplier
+            </label>
+
+            <input
+              type="number"
+              id="loyaltyTierMultiplier"
+              min="0"
+              step="0.01"
+              value="${
+                tier?.points_multiplier ?? 1
+              }"
+              required
+            >
+
+            <small class="text-muted">
+              Example: 1.5 means 1.5x points.
+            </small>
+          </div>
+
+          <div class="field">
+            <label>
+              Sort Order
+            </label>
+
+            <input
+              type="number"
+              id="loyaltyTierSort"
+              min="0"
+              step="1"
+              value="${
+                tier?.sort_order ??
+                state.loyaltyTiers.length + 1
+              }"
+            >
+          </div>
+
+        </div>
+
+        <div class="field">
+          <label
+            style="
+              display:flex;
+              align-items:center;
+              gap:8px;
+            "
+          >
+            <input
+              type="checkbox"
+              id="loyaltyTierActive"
+              style="width:auto"
+              ${
+                tier
+                  ? (
+                      tier.active
+                        ? 'checked'
+                        : ''
+                    )
+                  : 'checked'
+              }
+              ${isBronze ? 'disabled' : ''}
+            >
+
+            Active Tier
+          </label>
+
+          ${
+            isBronze
+              ? `
+                <small class="text-muted">
+                  Bronze is the base tier and must remain active at RM0.
+                </small>
+              `
+              : ''
+          }
+        </div>
+
+      </div>
+
+      <div class="modal-foot">
+
+        <button
+          type="button"
+          class="btn"
+          id="cancelLoyaltyTierBtn"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="submit"
+          class="btn primary"
+          id="saveLoyaltyTierBtn"
+        >
+          ${
+            editing
+              ? 'Save Changes'
+              : 'Create Tier'
+          }
+        </button>
+
+      </div>
+
+    </form>
+  `);
+
+  $('#closeLoyaltyTierModal')
+    ?.addEventListener(
+      'click',
+      closeModal
+    );
+
+  $('#cancelLoyaltyTierBtn')
+    ?.addEventListener(
+      'click',
+      closeModal
+    );
+
+  $('#loyaltyTierForm')
+    ?.addEventListener(
+      'submit',
+      async event => {
+        event.preventDefault();
+
+        const saveBtn =
+          $('#saveLoyaltyTierBtn');
+
+        saveBtn.disabled = true;
+
+        const payload = {
+          name: isBronze
+            ? 'Bronze'
+            : $('#loyaltyTierName')
+                .value
+                .trim(),
+
+          minimum_spend: isBronze
+            ? 0
+            : num(
+                $('#loyaltyTierMinSpend')
+                  .value
+              ),
+
+          discount_percentage:
+            num(
+              $('#loyaltyTierDiscount')
+                .value
+            ),
+
+          points_multiplier:
+            num(
+              $('#loyaltyTierMultiplier')
+                .value
+            ),
+
+          active: isBronze
+            ? true
+            : $('#loyaltyTierActive')
+                .checked,
+
+          sort_order:
+            parseInt(
+              $('#loyaltyTierSort')
+                .value || 0,
+              10
+            ),
+        };
+
+        try {
+          if (editing) {
+            await API.put(
+              `/loyalty-tiers/${tier.id}`,
+              payload
+            );
+
+            toast(
+              `${tier.name} tier updated.`
+            );
+          } else {
+            await API.post(
+              '/loyalty-tiers',
+              payload
+            );
+
+            toast(
+              `${payload.name} tier created.`
+            );
+          }
+
+          await refreshLoyaltyTiers();
+
+          closeModal();
+
+          route('customer');
+
+        } catch (err) {
+          showLoyaltyApiError(err);
+
+          saveBtn.disabled =
+            false;
+        }
+      }
+    );
 }
 
 /* ===== AUDIT ===== */
