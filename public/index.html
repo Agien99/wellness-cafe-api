@@ -25,11 +25,76 @@
 
   <div class="qr-body">
     <div id="tablePicker" class="card" style="margin:14px 0">
-      <div class="card-header"><h3>Select your table</h3></div>
-      <div id="tableButtons" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
-        <div class="text-muted text-center" style="grid-column:span 4">Loading tables…</div>
+
+      <div style="text-align:center;padding:8px 8px 18px">
+        <div style="font-size:34px;margin-bottom:6px">
+          🍽️
+        </div>
+
+        <h2 style="margin:0 0 6px">
+          Where are you seated?
+        </h2>
+
+        <p
+          class="text-muted"
+          style="
+            margin:0;
+            font-size:13px;
+          "
+        >
+          Select your table to start ordering
+        </p>
       </div>
-      <p class="text-muted text-center mt-3" style="font-size:11.5px">No table? <a href="#" id="takeaway" style="color:#10b981;font-weight:600">Order for takeaway</a></p>
+
+      <div
+        id="tableButtons"
+        style="
+          display:grid;
+          grid-template-columns:
+            repeat(auto-fit, minmax(130px, 1fr));
+          gap:12px;
+        "
+      >
+        <div
+          class="text-muted text-center"
+          style="grid-column:1/-1"
+        >
+          Loading tables…
+        </div>
+      </div>
+
+      <div
+        style="
+          border-top:1px solid #e5e7eb;
+          margin-top:18px;
+          padding-top:16px;
+          text-align:center;
+        "
+      >
+        <span
+          class="text-muted"
+          style="font-size:12px"
+        >
+          Not dining in?
+        </span>
+
+        <br>
+
+        <a
+          href="#"
+          id="takeaway"
+          style="
+            display:inline-block;
+            margin-top:6px;
+            color:#10b981;
+            font-weight:700;
+            text-decoration:none;
+          "
+        >
+          Order for takeaway →
+        </a>
+      </div>
+
     </div>
 
     <div id="menuArea" class="hidden">
@@ -111,9 +176,34 @@ async function loadData() {
 }
 
 function renderTables() {
-  $('#tableButtons').innerHTML = tables.map(t =>
-    `<button class="btn" data-tableid="${t.id}">${t.name} (${t.capacity})</button>`
-  ).join('');
+  $('#tableButtons').innerHTML =
+    tables.map(t => `
+      <button
+        class="btn"
+        data-tableid="${t.id}"
+        style="
+          min-height:100px;
+          display:flex;
+          flex-direction:column;
+          justify-content:center;
+          align-items:center;
+          gap:5px;
+          border-radius:14px;
+        "
+      >
+        <span style="font-size:24px">
+          🪑
+        </span>
+
+        <strong style="font-size:15px">
+          ${t.name}
+        </strong>
+
+        <small class="text-muted">
+          Up to ${t.capacity} pax
+        </small>
+      </button>
+    `).join('');
   $$('#tableButtons button[data-tableid]').forEach(b =>
     b.addEventListener('click', () => { tableId = +b.dataset.tableid; mode='dinein'; startMenu(); })
   );
