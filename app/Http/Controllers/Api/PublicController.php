@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\Table;
@@ -42,6 +43,80 @@ class PublicController extends Controller
     public function tables(): JsonResponse
     {
         return response()->json(Table::orderBy('id')->get());
+    }
+
+    /**
+     * POST /api/public/customer/lookup
+     *
+     * Find a loyalty customer by phone number.
+     */
+    public function lookupCustomer(
+        Request $request
+    ): JsonResponse {
+        $data = $request->validate([
+            'phone' => [
+                'required',
+                'string',
+                'max:32',
+            ],
+        ]);
+
+        $phone = trim($data['phone']);
+
+        $customers = Customer::query()
+            ->with('loyaltyTier')
+            ->where('phone', $phone)
+            ->where('id', '!=', 8)
+            ->get();
+
+        if ($customers->isEmpty()) {
+            return response()->json([
+                'found' => false,
+                'message' => 'Customer not found.',
+            ]);
+        }
+
+        if ($customers->count() > 1) {
+            return response()->json([
+                'found' => false,
+                'duplicate' => true,
+                'message' =>
+                    'More than one customer uses this phone number. Please ask staff for assistance.',
+            ]);
+        }
+
+        $customer = $customers->first();
+
+        return response()->json([
+            'found' => true,
+
+            'customer' => [
+                'id' => $customer->id,
+                'name' => $customer->name,
+                'membership' =>
+                    $customer->membership,
+
+                'points' =>
+                    (int) $customer->points,
+
+                'total_spent' =>
+                    (float) $customer->total_spent,
+
+                'discount_percentage' =>
+                    $customer->loyaltyTier?->active
+                        ? (float) $customer
+                            ->loyaltyTier
+                            ->discount_percentage
+                        : 0,
+
+                'points_multiplier' =>
+                    $customer->loyaltyTier?->active
+                        ? (float) $customer
+                            ->loyaltyTier
+                            ->points_multiplier
+                        : 1,
+            ],
+        ]);
     }
 
     /**
