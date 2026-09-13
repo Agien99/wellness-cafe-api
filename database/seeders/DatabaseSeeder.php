@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             CustomerSeeder::class,
             TableSeeder::class,
             PromotionSeeder::class,
+            LoyaltyTierSeeder::class,
         ]);
     }
 }
