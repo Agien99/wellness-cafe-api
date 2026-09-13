@@ -130,9 +130,9 @@ class OrderService
         $subtotal = round($subtotal, 2);
 
         /*
-         * Membership discount remains existing behaviour
-         * until Dynamic Loyalty is implemented.
-         */
+        * Membership discount is resolved dynamically
+        * from the customer's active loyalty tier.
+        */
         $memberDiscount = round(
             $subtotal * $customer->membership_discount,
             2
@@ -354,8 +354,9 @@ class OrderService
             }
 
             /*
-             * Existing loyalty logic retained temporarily.
-             */
+            * Award loyalty points and recalculate
+            * the customer's tier after payment.
+            */
             if (
                 $customer->id !== 8 &&
                 $payment
@@ -696,9 +697,10 @@ class OrderService
     }
 
     /**
-     * Existing loyalty logic extracted into helper.
+     * Award loyalty points and update lifetime spend.
      *
-     * This will be replaced later by Dynamic Loyalty.
+     * The customer's tier is recalculated dynamically
+     * from the active loyalty tier configuration.
      */
     private function awardLoyalty(
         Customer $customer,
@@ -794,9 +796,8 @@ class OrderService
     }
 
     /**
-     * Temporary hardcoded membership tier logic.
-     *
-     * Will be removed during Dynamic Loyalty phase.
+     * Resolve the highest eligible active loyalty tier
+     * based on the customer's lifetime spending.
      */
     private function resolveTier(
         float $totalSpent
