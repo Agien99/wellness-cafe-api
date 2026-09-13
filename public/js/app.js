@@ -364,6 +364,38 @@ VIEWS.pos = async (root) => {
     c => c.id === 8
   );
 
+  const activeLoyaltyTiers =
+  state.loyaltyTiers
+    .filter(t => t.active)
+    .sort(
+      (a, b) =>
+        num(a.minimum_spend) -
+        num(b.minimum_spend)
+    );
+
+  const currentSpend =
+    num(selectedCustomer?.total_spent);
+
+  const nextTier =
+    selectedCustomer?.id === 8
+      ? null
+      : activeLoyaltyTiers.find(
+          t =>
+            num(t.minimum_spend) >
+            currentSpend
+        );
+
+  const amountToNextTier =
+    nextTier
+      ? Math.max(
+          0,
+          r2(
+            num(nextTier.minimum_spend) -
+            currentSpend
+          )
+        )
+      : 0;
+
   root.innerHTML = `
     <div class="pos-shell">
 
@@ -477,6 +509,25 @@ VIEWS.pos = async (root) => {
                         ·
                         ${selectedCustomer?.points || 0}
                         pts
+
+                        <br>
+
+                        <span>
+                          ${money(currentSpend)} spent
+                        </span>
+
+                        ${nextTier ? `
+                          <br>
+                          <span>
+                            ${money(amountToNextTier)}
+                            to ${nextTier.name}
+                          </span>
+                        ` : `
+                          <br>
+                          <span>
+                            Highest loyalty tier reached
+                          </span>
+                        `}
                       </div>
                     `
                 }
