@@ -21,6 +21,7 @@ class Order extends Model
         'discount',
         'tax',
         'total',
+        'loyalty_points_earned',
         'status',
         'kitchen_status',
         'promo_code',
@@ -30,12 +31,13 @@ class Order extends Model
     ];
 
     protected $casts = [
-        'subtotal'        => 'decimal:2',
-        'member_discount' => 'decimal:2',
-        'promo_discount'  => 'decimal:2',
-        'discount'        => 'decimal:2',
-        'tax'             => 'decimal:2',
-        'total'           => 'decimal:2',
+        'subtotal'              => 'decimal:2',
+        'member_discount'       => 'decimal:2',
+        'promo_discount'        => 'decimal:2',
+        'discount'              => 'decimal:2',
+        'tax'                   => 'decimal:2',
+        'total'                 => 'decimal:2',
+        'loyalty_points_earned' => 'integer',
     ];
 
     public function customer(): BelongsTo

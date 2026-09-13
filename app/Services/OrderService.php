@@ -360,11 +360,16 @@ class OrderService
                 $customer->id !== 8 &&
                 $payment
             ) {
-                $this->awardLoyalty(
+                $earned = $this->awardLoyalty(
                     $customer,
                     $total,
                     $cashier
                 );
+
+                $order->loyalty_points_earned =
+                    $earned;
+
+                $order->save();
             }
 
             AuditLog::record(
@@ -578,11 +583,16 @@ class OrderService
                     $lockedOrder->customer;
 
                 if ($customer) {
-                    $this->awardLoyalty(
+                    $earned = $this->awardLoyalty(
                         $customer,
                         (float) $lockedOrder->total,
                         $cashier
                     );
+
+                    $lockedOrder->loyalty_points_earned =
+                        $earned;
+
+                    $lockedOrder->save();
                 }
             }
 
@@ -694,7 +704,7 @@ class OrderService
         Customer $customer,
         float $total,
         ?User $cashier
-    ): void {
+    ): int {
         $earned = (int) floor(
             $total *
             $customer->point_multiplier
@@ -733,6 +743,7 @@ class OrderService
         }
 
         $customer->save();
+        return $earned;
     }
 
     /**
@@ -880,10 +891,8 @@ class OrderService
                 $customer &&
                 $customer->id !== 8
             ) {
-                $reverse = (int) floor(
-                    (float) $order->total *
-                    $customer->point_multiplier
-                );
+                $reverse =
+                    (int) $order->loyalty_points_earned;
 
                 $customer->points = max(
                     0,
