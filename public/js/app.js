@@ -2924,7 +2924,34 @@ async function openCustomerForm(id) {
         <div class="field"><label>Email</label><input id="cEmail" type="email" value="${c.email||''}"></div>
       </div>
       <div class="form-row">
-        <div class="field"><label>Tier</label><select id="cTier">${state.membershipTiers.map(t=>`<option value="${t.name}" ${t.name===c.membership?'selected':''}>${t.name}</option>`).join('')}</select></div>
+        <div class="field">
+          <label>Tier</label>
+
+          <select id="cTier">
+            ${state.loyaltyTiers
+              .filter(function (t) {
+                return (
+                  t.active ||
+                  t.name === c.membership
+                );
+              })
+              .map(function (t) {
+                return `
+                  <option
+                    value="${t.name}"
+                    ${
+                      t.name === c.membership
+                        ? 'selected'
+                        : ''
+                    }
+                  >
+                    ${t.name}
+                  </option>
+                `;
+              })
+              .join('')}
+          </select>
+        </div>
         <div class="field"><label>Points</label><input id="cPts" type="number" value="${c.points}"></div>
       </div>
     </div>
