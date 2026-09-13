@@ -900,6 +900,28 @@ class OrderService
                     )
                 );
 
+                $newTier = $this->resolveTier(
+                    (float) $customer->total_spent
+                );
+
+                if (
+                    $newTier !==
+                    $customer->membership
+                ) {
+                    $oldTier =
+                        $customer->membership;
+
+                    $customer->membership =
+                        $newTier;
+
+                    AuditLog::record(
+                        $byUser,
+                        'LOYALTY_TIER_CHANGED',
+                        "{$customer->name}: " .
+                        "{$oldTier} → {$newTier} after refund"
+                    );
+                }
+
                 $customer->save();
             }
 
