@@ -184,6 +184,8 @@ let currentCat = null;
 let cart = [];
 let tableId = null;
 let mode = null; // 'dinein' | 'takeaway'
+let loyaltyCustomer = null;
+let loyaltyPhone = null;
 
 const $  = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -356,9 +358,32 @@ function refreshCartBar() {
 $('#qrViewCart').addEventListener('click', openCart);
 
 function openCart() {
-  const sub = cart.reduce((s,x)=>s+x.price*x.qty, 0);
-  const tax = sub * cafe.tax_rate;
-  const total = sub + tax;
+  const sub =
+    cart.reduce(
+      (s, x) => s + x.price * x.qty,
+      0
+    );
+
+  const memberDiscount =
+    loyaltyCustomer
+      ? sub *
+        (
+          +loyaltyCustomer.discount_percentage /
+          100
+        )
+      : 0;
+
+  const taxBase =
+    Math.max(
+      0,
+      sub - memberDiscount
+    );
+
+  const tax =
+    taxBase * cafe.tax_rate;
+
+  const total =
+    taxBase + tax;
   const html = `
     <div class="modal-head"><h3>🛒 Your Order</h3><button class="close-btn" onclick="document.getElementById('modalRoot').innerHTML=''">×</button></div>
     <div class="modal-body">
@@ -373,12 +398,189 @@ function openCart() {
       </div>`).join('')}
       ${cart.length>0?`
       <div class="cart-summary">
-        <div class="sum-line"><span>Subtotal</span><span>${money(sub)}</span></div>
-        <div class="sum-line"><span>Tax (${(cafe.tax_rate*100).toFixed(0)}%)</span><span>${money(tax)}</span></div>
-        <div class="sum-line total"><span>Total</span><span>${money(total)}</span></div>
+        <div class="sum-line">
+          <span>Subtotal</span>
+          <span>${money(sub)}</span>
+        </div>
+
+        ${
+          memberDiscount > 0
+            ? `
+              <div class="sum-line">
+                <span>
+                  ${loyaltyCustomer.membership}
+                  Member Discount
+                  (${loyaltyCustomer.discount_percentage}%)
+                </span>
+
+                <span>
+                  − ${money(memberDiscount)}
+                </span>
+              </div>
+            `
+            : ''
+        }
+
+        <div class="sum-line">
+          <span>
+            Tax (${(cafe.tax_rate * 100).toFixed(0)}%)
+          </span>
+          <span>${money(tax)}</span>
+        </div>
+
+        <div class="sum-line total">
+          <span>Total</span>
+          <span>${money(total)}</span>
+        </div>
       </div>
-      <div class="field mt-3"><label>Name (optional)</label><input id="qrName" placeholder="Your name"></div>
-      <div class="field"><label>Notes for kitchen (optional)</label><input id="qrNotes" placeholder="e.g. Less sugar"></div>
+
+      <div
+        style="
+          margin-top:16px;
+          padding:14px;
+          border:1px solid #e5e7eb;
+          border-radius:12px;
+          background:#f8fafc;
+        "
+      >
+        <div
+          style="
+            font-weight:700;
+            margin-bottom:4px;
+          "
+        >
+          ⭐ Wellness Loyalty
+        </div>
+
+        <div
+          class="text-muted"
+          style="
+            font-size:12px;
+            margin-bottom:12px;
+          "
+        >
+          Already a member? Find your account to receive
+          your loyalty benefits.
+        </div>
+
+        ${
+          loyaltyCustomer
+            ? `
+              <div
+                style="
+                  padding:12px;
+                  background:#fff;
+                  border:1px solid #d1fae5;
+                  border-radius:10px;
+                "
+              >
+                <div
+                  style="
+                    font-weight:700;
+                    font-size:15px;
+                  "
+                >
+                  ✓ ${loyaltyCustomer.name}
+                </div>
+
+                <div
+                  style="
+                    margin-top:4px;
+                    font-size:13px;
+                  "
+                >
+                  ${loyaltyCustomer.membership} Member
+                </div>
+
+                <div
+                  class="text-muted"
+                  style="
+                    margin-top:5px;
+                    font-size:12px;
+                  "
+                >
+                  ${loyaltyCustomer.points} points
+                  ·
+                  ${money(loyaltyCustomer.total_spent)} spent
+                </div>
+
+                ${
+                  loyaltyCustomer.discount_percentage > 0
+                    ? `
+                      <div
+                        style="
+                          margin-top:7px;
+                          font-size:12px;
+                          font-weight:700;
+                          color:#059669;
+                        "
+                      >
+                        ${loyaltyCustomer.discount_percentage}%
+                        member discount
+                      </div>
+                    `
+                    : ''
+                }
+
+                <button
+                  type="button"
+                  class="btn sm"
+                  id="qrChangeMember"
+                  style="margin-top:10px"
+                >
+                  Use another account
+                </button>
+              </div>
+            `
+            : `
+              <div class="field" style="margin-bottom:8px">
+                <label>Phone Number</label>
+
+                <input
+                  id="qrMemberPhone"
+                  type="tel"
+                  inputmode="tel"
+                  placeholder="e.g. 0123456789"
+                >
+              </div>
+
+              <button
+                type="button"
+                class="btn"
+                id="qrFindMember"
+                style="width:100%"
+              >
+                Find My Account
+              </button>
+
+              <div
+                id="qrMemberMessage"
+                style="
+                  display:none;
+                  margin-top:8px;
+                  font-size:12px;
+                "
+              ></div>
+            `
+        }
+      </div>
+
+      <div class="field mt-3">
+        <label>Name (optional)</label>
+        <input
+          id="qrName"
+          placeholder="Your name"
+          value="${loyaltyCustomer?.name || ''}"
+        >
+      </div>
+
+      <div class="field">
+        <label>Notes for kitchen (optional)</label>
+        <input
+          id="qrNotes"
+          placeholder="e.g. Less sugar"
+        >
+      </div>
       `:''}
     </div>
     <div class="modal-foot">
@@ -396,6 +598,85 @@ function openCart() {
     refreshCartBar();
     openCart();
   }));
+
+  const findMemberBtn = $('#qrFindMember');
+
+  if (findMemberBtn) {
+    findMemberBtn.addEventListener(
+      'click',
+      async () => {
+        const phone =
+          ($('#qrMemberPhone')?.value || '').trim();
+
+        const message =
+          $('#qrMemberMessage');
+
+        if (!phone) {
+          message.style.display = 'block';
+          message.style.color = '#dc2626';
+          message.textContent =
+            'Please enter your phone number.';
+          return;
+        }
+
+        findMemberBtn.disabled = true;
+        findMemberBtn.textContent =
+          'Searching...';
+
+        try {
+          const result = await fetchJson(
+            'POST',
+            '/customer/lookup',
+            { phone }
+          );
+
+          if (!result.found) {
+            message.style.display = 'block';
+            message.style.color = '#dc2626';
+            message.textContent =
+              result.message ||
+              'Customer not found.';
+
+            return;
+          }
+
+          loyaltyCustomer =
+            result.customer;
+
+          loyaltyPhone = phone;
+
+          openCart();
+
+        } catch (err) {
+          message.style.display = 'block';
+          message.style.color = '#dc2626';
+          message.textContent =
+            err.payload?.message ||
+            'Unable to find customer.';
+
+        } finally {
+          findMemberBtn.disabled = false;
+          findMemberBtn.textContent =
+            'Find My Account';
+        }
+      }
+    );
+  }
+
+  const changeMemberBtn =
+    $('#qrChangeMember');
+
+  if (changeMemberBtn) {
+    changeMemberBtn.addEventListener(
+      'click',
+      () => {
+        loyaltyCustomer = null;
+        loyaltyPhone = null;
+        openCart();
+      }
+    );
+  }
+
   const checkout = $('#qrCheckout');
   if (checkout) checkout.addEventListener('click', placeOrder);
 }
@@ -404,15 +685,34 @@ async function placeOrder() {
   const customerName = ($('#qrName')?.value || '').trim() || 'QR Customer';
   const notes = ($('#qrNotes')?.value || '').trim();
   try {
-    const order = await fetchJson('POST', '/orders', {
-      items: cart.map(c => ({ product_id: c.productId, qty: c.qty })),
-      table_id: tableId,
-      customer_name: customerName,
-      notes,
-    });
+    const order = await fetchJson(
+      'POST',
+      '/orders',
+      {
+        items: cart.map(c => ({
+          product_id: c.productId,
+          qty: c.qty
+        })),
+
+        table_id: tableId,
+
+        customer_name:
+          loyaltyCustomer
+            ? null
+            : customerName,
+
+        loyalty_phone:
+          loyaltyPhone,
+
+        notes,
+      }
+    );
     // Close the cart modal and switch the page to the live status view
     $('#modalRoot').innerHTML = '';
     cart = [];
+    loyaltyCustomer = null;
+    loyaltyPhone = null;
+
     refreshCartBar();
     // Persist so a phone reload still shows the customer's order
     try { localStorage.setItem('wc_active_order', order.order_no); } catch(e){}

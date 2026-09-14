@@ -136,8 +136,29 @@ class PublicController extends Controller
             'items.*.qty'        => ['required', 'integer', 'min:1'],
             'table_id'           => ['nullable', 'integer', 'exists:tables,id'],
             'customer_name'      => ['nullable', 'string', 'max:128'],
+            'loyalty_phone'      => ['nullable', 'string', 'max:32'],
             'notes'              => ['nullable', 'string', 'max:500'],
         ]);
+
+        $customerId = 8;
+
+        if (!empty($data['loyalty_phone'])) {
+            $phone = trim($data['loyalty_phone']);
+
+            $customers = Customer::query()
+                ->where('phone', $phone)
+                ->where('id', '!=', 8)
+                ->get();
+
+            if ($customers->count() !== 1) {
+                return response()->json([
+                    'message' =>
+                        'Loyalty account could not be verified. Please search for your account again.',
+                ], 422);
+            }
+
+            $customerId = $customers->first()->id;
+        }
 
         // QR orders always:
         //  - channel = qr
@@ -146,7 +167,7 @@ class PublicController extends Controller
         //  - no payment yet (cashier completes payment at counter)
         $order = $this->orders->create([
             'items'       => $data['items'],
-            'customer_id' => 8,
+            'customer_id' => $customerId,
             'channel'     => 'qr',
             'table_id'    => $data['table_id'] ?? null,
             'notes'       => $data['notes'] ?? null,
@@ -155,8 +176,13 @@ class PublicController extends Controller
         ]);
 
         // Override customer_name for QR order if provided
-        if (!empty($data['customer_name'])) {
-            $order->customer_name = $data['customer_name'];
+        if (
+            $customerId === 8 &&
+            !empty($data['customer_name'])
+        ) {
+            $order->customer_name =
+                $data['customer_name'];
+
             $order->save();
         }
 
