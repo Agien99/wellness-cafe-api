@@ -725,13 +725,12 @@ async function placeOrder() {
 /* ===== Live order status (post-order) ===== */
 let statusPollTimer = null;
 let lastStage = null;
-let qrPayloadCache = null; // cache the DuitNow QR payload so we don't re-fetch on every poll
 const STATUS_POLL_MS = 5000;
 
 const STAGES = [
-  { key:'waiting_payment', label:'Awaiting payment', icon:'💳', detail:'Scan the QR below to pay from your phone, or pay at the counter.' },
-  { key:'preparing',       label:'Preparing',      icon:'👨‍🍳', detail:'The kitchen has received your order.' },
-  { key:'ready',           label:'Ready for pickup', icon:'🛎', detail:'Your order is ready — please collect it.' },
+  { key:'waiting_payment', label:'Awaiting payment',icon:'💳', detail:'Please proceed to the cashier counter to make payment.'},
+  { key:'preparing',       label:'Preparing',       icon:'👨‍🍳', detail:'The kitchen has received your order.' },
+  { key:'ready',           label:'Ready for pickup',icon:'🛎',  detail:'Your order is ready — please collect it.' },
   { key:'completed',       label:'Picked up',       icon:'✅', detail:'Enjoy! Thank you for visiting.' },
 ];
 
@@ -746,47 +745,9 @@ function showStatusView(orderNo) {
   $('#statusView').classList.remove('hidden');
   $('#tableInfo').textContent = `📋 Order ${orderNo}`;
   lastStage = null;
-  qrPayloadCache = null;
   fetchAndRenderStatus(orderNo);
   stopStatusPoll();
   statusPollTimer = setInterval(() => fetchAndRenderStatus(orderNo), STATUS_POLL_MS);
-}
-
-/**
- * Ensure the DuitNow QR is drawn into the #payQrSlot container.
- * Called after every status render while stage === 'waiting_payment'.
- * Fetches the QR payload the first time, caches it for subsequent renders.
- */
-async function ensurePayQrRendered(orderNo) {
-  const slot = document.getElementById('payQrSlot');
-  if (!slot) return;
-  // Fetch payload once and cache
-  if (!qrPayloadCache) {
-    try {
-      qrPayloadCache = await fetchJson('GET', `/orders/${encodeURIComponent(orderNo)}/duitnow-qr`);
-    } catch (err) {
-      slot.innerHTML = `<div class="alert alert-warn" style="font-size:12px;margin:0">
-        Could not generate QR (${err.payload?.message || err.message}). Please pay at the counter.
-      </div>`;
-      return;
-    }
-  }
-  // Build canvas (fresh on every render — innerHTML wipes it)
-  slot.innerHTML = '<canvas id="payQrCanvas" width="220" height="220" style="display:block;margin:auto"></canvas>';
-  try {
-    new QRious({
-      element: document.getElementById('payQrCanvas'),
-      value: qrPayloadCache.payload,
-      size: 220,
-      level: 'M',
-      background: '#ffffff',
-      foreground: '#064e3b',
-    });
-  } catch (err) {
-    slot.innerHTML = `<div class="alert alert-warn" style="font-size:12px;margin:0">
-      Could not render QR. Please pay at the counter.
-    </div>`;
-  }
 }
 
 async function fetchAndRenderStatus(orderNo) {
@@ -837,7 +798,7 @@ function renderStatusView(d) {
                 : 'hero-cooking';
 
   const headline = {
-    waiting_payment: 'Pay to start your order',
+    waiting_payment: 'Please pay at the counter',
     preparing:       'Preparing your order…',
     ready:           '🎉 Ready for pickup!',
     completed:       'Order complete',
@@ -847,32 +808,74 @@ function renderStatusView(d) {
 
   const itemsHtml = (d.items || []).map(i => `<li><b>${i.qty}×</b> ${i.name}</li>`).join('');
 
-  // DuitNow QR card — only when awaiting payment.
-  // We render it as a placeholder div first; the QR canvas is drawn after the
-  // HTML is in the DOM (so QRious can find the canvas element).
+  // Payment instruction — shown while payment is still pending.
   const payCard = d.stage === 'waiting_payment' ? `
     <div class="card pay-card">
-      <div class="card-header"><h3>💳 Pay with DuitNow QR</h3></div>
+      <div class="card-header">
+        <h3>💳 Payment Required</h3>
+      </div>
+
       <div class="pay-card-amount">
-        <div class="lbl">Amount</div>
+        <div class="lbl">Amount to Pay</div>
         <div class="val">${money(d.total)}</div>
       </div>
-      <div id="payQrSlot" class="pay-qr-slot">
-        <div class="pay-qr-loading">Generating QR…</div>
+
+      <div
+        style="
+          text-align:center;
+          padding:18px 12px;
+        "
+      >
+        <div
+          style="
+            font-size:42px;
+            margin-bottom:10px;
+          "
+        >
+          🧾
+        </div>
+
+        <h3 style="margin:0 0 8px">
+          Please proceed to the cashier
+        </h3>
+
+        <p
+          class="text-muted"
+          style="
+            margin:0;
+            font-size:13px;
+            line-height:1.6;
+          "
+        >
+          Show your order number to the cashier and make payment
+          at the counter.
+        </p>
+
+        <div
+          style="
+            margin-top:16px;
+            padding:12px;
+            background:#f8fafc;
+            border-radius:10px;
+            font-size:14px;
+          "
+        >
+          Order Number<br>
+          <b style="font-size:20px">${d.order_no}</b>
+        </div>
+
+        <div
+          style="
+            margin-top:14px;
+            font-size:12px;
+            color:#64748b;
+          "
+        >
+          Your order will be confirmed after payment is received.
+        </div>
       </div>
-      <ol class="pay-instructions">
-        <li><b>Save</b> or screenshot the QR above (long-press the image on most phones).</li>
-        <li>Open your banking app (Maybank, CIMB, MAE, TNG, Boost, etc.) → tap <b>Pay</b> or <b>Scan QR</b>.</li>
-        <li>Tap <b>Upload from gallery</b> and pick the saved QR.</li>
-        <li>The amount and reference are pre-filled — just confirm and pay.</li>
-      </ol>
-      <div class="pay-alt">
-        <span>Prefer cash or card?</span> <b>Just walk up to the counter</b> — the cashier will help you pay there.
-      </div>
-      <div class="text-muted text-center" style="font-size:11px;margin-top:8px">
-        Once you pay, this page will update automatically within a few seconds.
-      </div>
-    </div>` : '';
+    </div>
+  ` : '';
 
   $('#statusView').innerHTML = `
     <div class="status-hero ${heroCls}">
@@ -903,10 +906,6 @@ function renderStatusView(d) {
       <button class="btn mt-3" onclick="startNewOrderFromStatus()">Start New Order</button>
     </div>
   `;
-
-  // Render the DuitNow QR canvas after the HTML is in the DOM
-  if (d.stage === 'waiting_payment') ensurePayQrRendered(d.order_no);
-  else qrPayloadCache = null; // free cache once paid
 }
 
 function startNewOrderFromStatus() {
