@@ -17,7 +17,14 @@ class MenuController extends Controller
     {
         return response()->json([
             'categories' => Category::orderBy('sort_order')->get(),
-            'products'   => Product::orderBy('category_id')->orderBy('id')->get(),
+            'products' => Product::with([
+            'optionGroups.values',
+            'variants.optionValues',
+            'addons',
+        ])
+            ->orderBy('category_id')
+            ->orderBy('id')
+            ->get(),
         ]);
     }
 

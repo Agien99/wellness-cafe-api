@@ -16,6 +16,8 @@ use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\TableController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\LoyaltyTierController;
+use App\Http\Controllers\Api\ProductConfigurationController;
+use App\Http\Controllers\Api\AddonController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -66,6 +68,64 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/products/{product}',       [ProductController::class, 'destroy']);
     Route::post  ('/products/{product}/image', [ProductController::class, 'uploadImage']);
     Route::delete('/products/{product}/image', [ProductController::class, 'removeImage']);
+
+    // -- Add-ons --
+    Route::get   ('/addons',         [AddonController::class, 'index']);
+    Route::post  ('/addons',         [AddonController::class, 'store']);
+    Route::get   ('/addons/{addon}', [AddonController::class, 'show']);
+    Route::put   ('/addons/{addon}', [AddonController::class, 'update']);
+    Route::delete('/addons/{addon}', [AddonController::class, 'destroy']);
+
+    // -- Product V2 Configuration --
+    Route::post(
+        '/products/{product}/option-groups',
+        [ProductConfigurationController::class, 'storeOptionGroup']
+    );
+
+    Route::put(
+        '/product-option-groups/{optionGroup}',
+        [ProductConfigurationController::class, 'updateOptionGroup']
+    );
+
+    Route::delete(
+        '/product-option-groups/{optionGroup}',
+        [ProductConfigurationController::class, 'destroyOptionGroup']
+    );
+
+    Route::post(
+        '/product-option-groups/{optionGroup}/values',
+        [ProductConfigurationController::class, 'storeOptionValue']
+    );
+
+    Route::put(
+        '/product-option-values/{optionValue}',
+        [ProductConfigurationController::class, 'updateOptionValue']
+    );
+
+    Route::delete(
+        '/product-option-values/{optionValue}',
+        [ProductConfigurationController::class, 'destroyOptionValue']
+    );
+
+    Route::post(
+        '/products/{product}/variants',
+        [ProductConfigurationController::class, 'storeVariant']
+    );
+
+    Route::put(
+        '/product-variants/{variant}',
+        [ProductConfigurationController::class, 'updateVariant']
+    );
+
+    Route::delete(
+        '/product-variants/{variant}',
+        [ProductConfigurationController::class, 'destroyVariant']
+    );
+
+    Route::put(
+        '/products/{product}/addons',
+        [ProductConfigurationController::class, 'syncAddons']
+    );
 
     // -- Tables (full CRUD) --
     Route::get   ('/tables',          [TableController::class, 'index']);

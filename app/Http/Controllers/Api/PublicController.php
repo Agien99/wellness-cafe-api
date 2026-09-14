@@ -35,7 +35,16 @@ class PublicController extends Controller
                 'tax_rate'=> 0.06,
             ],
             'categories' => Category::orderBy('sort_order')->get(),
-            'products'   => Product::where('available', true)->orderBy('category_id')->orderBy('id')->get(),
+            'products' => Product::query()
+                ->where('visible', true)
+                ->with([
+                    'optionGroups.values',
+                    'variants.optionValues',
+                    'addons',
+                ])
+                ->orderBy('category_id')
+                ->orderBy('id')
+                ->get(),
         ]);
     }
 
@@ -132,8 +141,33 @@ class PublicController extends Controller
     {
         $data = $request->validate([
             'items'              => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
-            'items.*.qty'        => ['required', 'integer', 'min:1'],
+            'items.*.product_id' => [
+                'required',
+                'integer',
+                'exists:products,id',
+            ],
+
+            'items.*.product_variant_id' => [
+                'nullable',
+                'integer',
+                'exists:product_variants,id',
+            ],
+
+            'items.*.addon_ids' => [
+                'nullable',
+                'array',
+            ],
+
+            'items.*.addon_ids.*' => [
+                'integer',
+                'exists:addons,id',
+            ],
+
+            'items.*.qty' => [
+                'required',
+                'integer',
+                'min:1',
+            ],
             'table_id'           => ['nullable', 'integer', 'exists:tables,id'],
             'customer_name'      => ['nullable', 'string', 'max:128'],
             'loyalty_phone'      => ['nullable', 'string', 'max:32'],

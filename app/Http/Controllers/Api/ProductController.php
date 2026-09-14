@@ -14,13 +14,30 @@ class ProductController extends Controller
     /** GET /api/products  — full list (sales-side uses MenuController) */
     public function index(): JsonResponse
     {
-        return response()->json(Product::with('category')->orderBy('category_id')->orderBy('id')->get());
+        return response()->json(
+            Product::with([
+                'category',
+                'optionGroups.values',
+                'variants.optionValues',
+                'addons',
+            ])
+                ->orderBy('category_id')
+                ->orderBy('id')
+                ->get()
+        );
     }
 
     /** GET /api/products/{product} */
     public function show(Product $product): JsonResponse
     {
-        return response()->json($product->load('category'));
+        return response()->json(
+            $product->load([
+                'category',
+                'optionGroups.values',
+                'variants.optionValues',
+                'addons',
+            ])
+        );
     }
 
     /** POST /api/products */
@@ -34,16 +51,28 @@ class ProductController extends Controller
             'size'        => ['nullable', 'string', 'max:16'],
             'image'       => ['nullable', 'string', 'max:8'],
             'available'   => ['nullable', 'boolean'],
+            'visible'      => ['nullable', 'boolean'],
+            'product_type' => ['nullable', 'in:simple,configurable'],
             'recipe'      => ['nullable', 'array'],
             'recipe.*.ingredient_id' => ['required_with:recipe', 'integer', 'exists:inventory_items,id'],
             'recipe.*.qty'           => ['required_with:recipe', 'numeric', 'min:0'],
         ]);
         $data['cost']      = $data['cost'] ?? 0;
         $data['available'] = $data['available'] ?? true;
+        $data['visible'] = $data['visible'] ?? true;
+        $data['product_type'] = $data['product_type'] ?? 'simple';
         $data['recipe']    = $data['recipe'] ?? [];
         $product = Product::create($data);
         AuditLog::record($request->user(), 'PRODUCT_CREATED', $product->name . ' (RM' . number_format($product->price, 2) . ')');
-        return response()->json($product->load('category'), 201);
+        return response()->json(
+            $product->load([
+                'category',
+                'optionGroups.values',
+                'variants.optionValues',
+                'addons',
+            ]),
+            201
+        );
     }
 
     /** PUT /api/products/{product} */
@@ -57,13 +86,22 @@ class ProductController extends Controller
             'size'        => ['nullable', 'string', 'max:16'],
             'image'       => ['nullable', 'string', 'max:8'],
             'available'   => ['nullable', 'boolean'],
+            'visible'      => ['nullable', 'boolean'],
+            'product_type' => ['nullable', 'in:simple,configurable'],
             'recipe'      => ['nullable', 'array'],
             'recipe.*.ingredient_id' => ['required_with:recipe', 'integer', 'exists:inventory_items,id'],
             'recipe.*.qty'           => ['required_with:recipe', 'numeric', 'min:0'],
         ]);
         $product->update($data);
         AuditLog::record($request->user(), 'PRODUCT_UPDATED', $product->name);
-        return response()->json($product->load('category'));
+        return response()->json(
+            $product->load([
+                'category',
+                'optionGroups.values',
+                'variants.optionValues',
+                'addons',
+            ])
+        );
     }
 
     /** DELETE /api/products/{product}  — soft delete */
