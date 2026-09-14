@@ -6488,37 +6488,209 @@ async function openProductForm(id) {
 
           <div class="field">
             <label>
-              Product Name *
+              Product Name
             </label>
 
             <input
               id="productName"
               value="${product.name || ''}"
-              placeholder="e.g. Latte"
+              placeholder="e.g. Americano"
             >
           </div>
 
+
           <div class="field">
             <label>
-              Category *
+              Category
             </label>
 
             <select id="productCategory">
-              ${cats.map(cat => `
+
+              ${cats.map(category => `
                 <option
-                  value="${cat.id}"
+                  value="${category.id}"
                   ${
-                    Number(cat.id) ===
-                    Number(product.category_id)
+                    Number(product.category_id) ===
+                    Number(category.id)
                       ? 'selected'
                       : ''
                   }
                 >
-                  ${cat.icon || '🍽️'}
-                  ${cat.name}
+                  ${category.icon || '🍽️'}
+                  ${category.name}
                 </option>
               `).join('')}
+
             </select>
+          </div>
+
+        </div>
+
+
+        <div class="form-row">
+
+          <div class="field">
+            <label>
+              Product Type
+            </label>
+
+            <select id="productType">
+
+              <option
+                value="simple"
+                ${
+                  product.product_type ===
+                  'simple'
+                    ? 'selected'
+                    : ''
+                }
+              >
+                Simple Product
+              </option>
+
+              <option
+                value="configurable"
+                ${
+                  product.product_type ===
+                  'configurable'
+                    ? 'selected'
+                    : ''
+                }
+              >
+                Configurable Product
+              </option>
+
+            </select>
+
+            <small class="text-muted">
+              Simple = one price.
+              Configurable = options and variants.
+            </small>
+          </div>
+
+
+          <div class="field">
+            <label>
+              Fallback Icon
+            </label>
+
+            <input
+              id="productIcon"
+              maxlength="8"
+              value="${product.image || ''}"
+              placeholder="☕"
+            >
+
+            <small class="text-muted">
+              Used if no product image is uploaded.
+            </small>
+          </div>
+
+        </div>
+
+
+        <div class="form-section">
+
+          <div class="form-section-title">
+            Product Image
+          </div>
+
+          <div
+            style="
+              display:flex;
+              gap:18px;
+              align-items:flex-start;
+              flex-wrap:wrap;
+            "
+          >
+
+            <div
+              id="productImagePreview"
+              style="
+                width:150px;
+                height:150px;
+                border:1px solid var(--border);
+                border-radius:12px;
+                background:#f7f7f5;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                overflow:hidden;
+                flex-shrink:0;
+              "
+            >
+
+              ${
+                product.image_url
+                  ? `
+                    <img
+                      src="${product.image_url}"
+                      alt="${product.name || 'Product'}"
+                      style="
+                        width:100%;
+                        height:100%;
+                        object-fit:cover;
+                      "
+                    >
+                  `
+                  : `
+                    <span
+                      style="
+                        font-size:54px;
+                      "
+                    >
+                      ${product.image || '🍽️'}
+                    </span>
+                  `
+              }
+
+            </div>
+
+
+            <div
+              style="
+                flex:1;
+                min-width:220px;
+              "
+            >
+
+              <div class="field">
+
+                <label>
+                  Upload Product Image
+                </label>
+
+                <input
+                  type="file"
+                  id="productImageFile"
+                  accept="image/jpeg,image/png,image/webp"
+                >
+
+                <small class="text-muted">
+                  JPG, PNG or WebP.
+                  Image will be uploaded after
+                  the product is saved.
+                </small>
+
+              </div>
+
+
+              ${
+                product.image_url
+                  ? `
+                    <button
+                      type="button"
+                      class="btn danger sm"
+                      id="removeProductImage"
+                    >
+                      Remove Image
+                    </button>
+                  `
+                  : ''
+              }
+
+            </div>
+
           </div>
 
         </div>
@@ -6924,6 +7096,88 @@ async function openProductForm(id) {
       }
     );
 
+  const productImageInput =
+    $('#productImageFile');
+
+  productImageInput
+    ?.addEventListener(
+      'change',
+      event => {
+
+        const file =
+          event.target.files?.[0];
+
+        if (!file) {
+          return;
+        }
+
+        const preview =
+          $('#productImagePreview');
+
+        if (!preview) {
+          return;
+        }
+
+        const url =
+          URL.createObjectURL(file);
+
+        preview.innerHTML = `
+          <img
+            src="${url}"
+            alt="Preview"
+            style="
+              width:100%;
+              height:100%;
+              object-fit:cover;
+            "
+          >
+        `;
+      }
+    );
+
+
+  $('#removeProductImage')
+    ?.addEventListener(
+      'click',
+      async () => {
+
+        if (
+          !confirm(
+            'Remove this product image?'
+          )
+        ) {
+          return;
+        }
+
+        try {
+
+          await API.delete(
+            '/products/' +
+              product.id +
+              '/image'
+          );
+
+          toast(
+            'Product image removed.'
+          );
+
+          openProductForm(
+            product.id
+          );
+
+        }
+        catch (err) {
+
+          toast(
+            err.payload?.message ||
+            'Could not remove image.',
+            'error'
+          );
+
+        }
+      }
+    );
+
   $('#saveProduct')
     .addEventListener(
       'click',
@@ -7026,6 +7280,30 @@ async function openProductForm(id) {
                 product.id,
                 payload
               );
+          }
+
+          const imageFile =
+            $('#productImageFile')
+              ?.files?.[0];
+
+          if (imageFile) {
+
+            if (
+              imageFile.size >
+              4 * 1024 * 1024
+            ) {
+              throw new Error(
+                'Product image must not exceed 4 MB.'
+              );
+            }
+
+            await API.upload(
+              '/products/' +
+                savedProduct.id +
+                '/image',
+              imageFile,
+              'image'
+            );
           }
 
 
