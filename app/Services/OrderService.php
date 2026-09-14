@@ -9,6 +9,8 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\Addon;
+use App\Models\ProductVariant;
 use App\Models\Promotion;
 use App\Models\PromotionUsage;
 use App\Models\StockMovement;
@@ -86,8 +88,12 @@ class OrderService
         }
 
         /*
-         * Resolve products before transaction.
-         */
+        * Resolve products, variants and add-ons before transaction.
+        *
+        * Important:
+        * The client never controls the selling price.
+        * All prices are loaded from the database here.
+        */
         $resolved = [];
         $subtotal = 0;
 
@@ -117,14 +123,135 @@ class OrderService
                 (int) ($line['qty'] ?? 1)
             );
 
+            $variant = null;
+            $variantName = null;
+
+            /*
+            * Resolve selling price.
+            *
+            * Simple product:
+            *     products.price
+            *
+            * Configurable product:
+            *     product_variants.price
+            */
+            if ($product->product_type === 'configurable') {
+                $variantId =
+                    $line['product_variant_id'] ?? null;
+
+                if (!$variantId) {
+                    throw ValidationException::withMessages([
+                        'items' => [
+                            "Please select a variant for '{$product->name}'.",
+                        ],
+                    ]);
+                }
+
+                $variant = ProductVariant::query()
+                    ->whereKey($variantId)
+                    ->where('product_id', $product->id)
+                    ->first();
+
+                if (!$variant) {
+                    throw ValidationException::withMessages([
+                        'items' => [
+                            "Selected variant does not belong to '{$product->name}'.",
+                        ],
+                    ]);
+                }
+
+                if (!$variant->available) {
+                    throw ValidationException::withMessages([
+                        'items' => [
+                            "Variant '{$variant->name}' is unavailable.",
+                        ],
+                    ]);
+                }
+
+                $basePrice = (float) $variant->price;
+                $variantName = $variant->name;
+            } else {
+                /*
+                * Simple products must not accept a variant
+                * belonging to another product.
+                */
+                if (!empty($line['product_variant_id'])) {
+                    throw ValidationException::withMessages([
+                        'items' => [
+                            "Product '{$product->name}' does not use variants.",
+                        ],
+                    ]);
+                }
+
+                $basePrice = (float) $product->price;
+            }
+
+            /*
+            * Resolve optional add-ons.
+            */
+            $addonIds = array_values(
+                array_unique(
+                    array_map(
+                        'intval',
+                        $line['addon_ids'] ?? []
+                    )
+                )
+            );
+
+            $addonSnapshots = [];
+            $addonTotal = 0;
+
+            if (count($addonIds) > 0) {
+                /*
+                * Only add-ons assigned to this product
+                * and currently available may be ordered.
+                */
+                $addons = $product->addons()
+                    ->whereIn('addons.id', $addonIds)
+                    ->where('addons.available', true)
+                    ->get();
+
+                if ($addons->count() !== count($addonIds)) {
+                    throw ValidationException::withMessages([
+                        'items' => [
+                            "One or more add-ons are invalid or unavailable for '{$product->name}'.",
+                        ],
+                    ]);
+                }
+
+                foreach ($addons as $addon) {
+                    $addonPrice = (float) $addon->price;
+
+                    $addonSnapshots[] = [
+                        'id' => $addon->id,
+                        'name' => $addon->name,
+                        'price' => $addonPrice,
+                    ];
+
+                    $addonTotal += $addonPrice;
+                }
+            }
+
+            /*
+            * OrderItem.price stores the final unit price:
+            *
+            * variant/simple price + selected add-ons.
+            */
+            $unitPrice = round(
+                $basePrice + $addonTotal,
+                2
+            );
+
             $resolved[] = [
                 'product' => $product,
+                'variant' => $variant,
+                'variant_name' => $variantName,
+                'addons' => $addonSnapshots,
                 'qty' => $qty,
-                'price' => (float) $product->price,
+                'price' => $unitPrice,
             ];
 
-            $subtotal +=
-                (float) $product->price * $qty;
+            $subtotal += $unitPrice * $qty;
         }
 
         $subtotal = round($subtotal, 2);
@@ -287,13 +414,27 @@ class OrderService
 
             foreach ($resolved as $line) {
                 OrderItem::create([
-                    'order_id' => $order->id,
+                    'order_id' =>
+                        $order->id,
+
                     'product_id' =>
                         $line['product']->id,
+
+                    'product_variant_id' =>
+                        $line['variant']?->id,
+
+                    'variant_name' =>
+                        $line['variant_name'],
+
+                    'addons' =>
+                        $line['addons'],
+
                     'name' =>
                         $line['product']->name,
+
                     'price' =>
                         $line['price'],
+
                     'qty' =>
                         $line['qty'],
                 ]);

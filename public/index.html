@@ -322,27 +322,514 @@ function renderCats() {
   }));
 }
 
+function productIsOrderable(product) {
+  if (!product.available) {
+    return false;
+  }
+
+  if (product.product_type !== 'configurable') {
+    return true;
+  }
+
+  return (product.variants || []).some(
+    variant => variant.available
+  );
+}
+
+function productDisplayPrice(product) {
+  if (product.product_type !== 'configurable') {
+    return money(product.price);
+  }
+
+  const prices = (product.variants || [])
+    .filter(variant => variant.available)
+    .map(variant => +variant.price);
+
+  if (prices.length === 0) {
+    return 'Sold Out';
+  }
+
+  return `From ${money(Math.min(...prices))}`;
+}
+
 function renderProducts() {
-  const prods = products.filter(p => p.category_id === currentCat && p.available);
+  const prods = products.filter(
+    p => p.category_id === currentCat
+  );
+
   $('#qrProducts').innerHTML = prods.map(p => {
+    const orderable = productIsOrderable(p);
+
     const visual = p.image_url
-      ? `<img src="${p.image_url}" style="width:70px;height:70px;border-radius:8px;object-fit:cover">`
+      ? `
+        <img
+          src="${p.image_url}"
+          style="
+            width:70px;
+            height:70px;
+            border-radius:8px;
+            object-fit:cover;
+          "
+        >
+      `
       : (p.image || '🍽');
-    return `<div class="qr-product">
-      <div class="img">${visual}</div>
-      <div class="name">${p.name}</div>
-      <div class="price">${money(p.price)}</div>
-      <button class="add" data-id="${p.id}">+ Add</button>
-    </div>`;
+
+    return `
+      <div class="qr-product ${orderable ? '' : 'sold-out'}">
+        <div class="img">${visual}</div>
+
+        <div class="name">
+          ${p.name}
+        </div>
+
+        <div class="price">
+          ${productDisplayPrice(p)}
+        </div>
+
+        ${
+          orderable
+            ? `
+              <button
+                class="add"
+                data-id="${p.id}"
+              >
+                ${
+                  p.product_type === 'configurable' ||
+                  (p.addons || []).length > 0
+                    ? 'Choose →'
+                    : '+ Add'
+                }
+              </button>
+            `
+            : `
+              <button
+                class="add"
+                disabled
+              >
+                Sold Out
+              </button>
+            `
+        }
+      </div>
+    `;
   }).join('');
-  $$('#qrProducts .add').forEach(b => b.addEventListener('click', () => {
-    const p = products.find(x => x.id === +b.dataset.id);
-    const ex = cart.find(x => x.productId === p.id);
-    if (ex) ex.qty += 1;
-    else cart.push({ productId: p.id, name: p.name, price: +p.price, qty: 1 });
-    toast(`Added: ${p.name}`);
-    refreshCartBar();
-  }));
+
+  $$('#qrProducts .add[data-id]').forEach(button => {
+    button.addEventListener('click', () => {
+      const product = products.find(
+        p => p.id === +button.dataset.id
+      );
+
+      if (!product) {
+        return;
+      }
+
+      if (
+        product.product_type === 'configurable' ||
+        (product.addons || []).length > 0
+      ) {
+        openProductModal(product);
+        return;
+      }
+
+      addConfiguredItemToCart(
+        product,
+        null,
+        []
+      );
+    });
+  });
+}
+
+function addConfiguredItemToCart(
+  product,
+  variant = null,
+  addons = []
+) {
+  const addonIds = addons
+    .map(addon => +addon.id)
+    .sort((a, b) => a - b);
+
+  const addonTotal = addons.reduce(
+    (sum, addon) => sum + +addon.price,
+    0
+  );
+
+  const basePrice = variant
+    ? +variant.price
+    : +product.price;
+
+  const price = basePrice + addonTotal;
+
+  const key = [
+    product.id,
+    variant?.id || 0,
+    addonIds.join('-'),
+  ].join(':');
+
+  const existing = cart.find(
+    item => item.key === key
+  );
+
+  if (existing) {
+    existing.qty += 1;
+  } else {
+    cart.push({
+      key,
+
+      productId:
+        product.id,
+
+      productVariantId:
+        variant?.id || null,
+
+      addonIds,
+
+      name:
+        product.name,
+
+      variantName:
+        variant?.name || null,
+
+      addonNames:
+        addons.map(addon => addon.name),
+
+      price,
+      qty: 1,
+    });
+  }
+
+  toast(`Added: ${product.name}`);
+
+  refreshCartBar();
+}
+
+function openProductModal(product) {
+  const groups =
+    product.option_groups || [];
+
+  const variants =
+    product.variants || [];
+
+  const addons =
+    (product.addons || [])
+      .filter(addon => addon.available);
+
+  const selectedValues = {};
+  const selectedAddonIds = new Set();
+
+  function selectedVariant() {
+    if (product.product_type !== 'configurable') {
+      return null;
+    }
+
+    const selectedIds = Object.values(
+      selectedValues
+    )
+      .map(Number)
+      .sort((a, b) => a - b);
+
+    if (selectedIds.length !== groups.length) {
+      return null;
+    }
+
+    return variants.find(variant => {
+      if (!variant.available) {
+        return false;
+      }
+
+      const variantIds =
+        (variant.option_values || [])
+          .map(value => +value.id)
+          .sort((a, b) => a - b);
+
+      return (
+        variantIds.length === selectedIds.length &&
+        variantIds.every(
+          (id, index) =>
+            id === selectedIds[index]
+        )
+      );
+    }) || null;
+  }
+
+  function renderModal() {
+    const variant = selectedVariant();
+
+    const selectedAddons = addons.filter(
+      addon => selectedAddonIds.has(+addon.id)
+    );
+
+    const addonTotal = selectedAddons.reduce(
+      (sum, addon) => sum + +addon.price,
+      0
+    );
+
+    const basePrice =
+      product.product_type === 'configurable'
+        ? variant
+          ? +variant.price
+          : null
+        : +product.price;
+
+    const finalPrice =
+      basePrice === null
+        ? null
+        : basePrice + addonTotal;
+
+    const optionHtml = groups.map(group => `
+      <div class="product-option-group">
+        <div class="product-option-title">
+          ${group.name}
+          ${
+            group.required
+              ? '<span class="required-mark">*</span>'
+              : ''
+          }
+        </div>
+
+        <div class="product-option-values">
+          ${(group.values || []).map(value => `
+            <button
+              type="button"
+              class="
+                product-option-btn
+                ${
+                  selectedValues[group.id] === value.id
+                    ? 'selected'
+                    : ''
+                }
+              "
+              data-group="${group.id}"
+              data-value="${value.id}"
+              ${value.available ? '' : 'disabled'}
+            >
+              ${value.name}
+              ${
+                value.available
+                  ? ''
+                  : '<small>Sold Out</small>'
+              }
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
+
+    const addonHtml = addons.length
+      ? `
+        <div class="product-addon-section">
+          <div class="product-option-title">
+            ⚡ Boost it Up!
+          </div>
+
+          <div class="product-addon-list">
+            ${addons.map(addon => `
+              <label class="product-addon-row">
+                <span>
+                  <input
+                    type="checkbox"
+                    data-addon="${addon.id}"
+                    ${
+                      selectedAddonIds.has(+addon.id)
+                        ? 'checked'
+                        : ''
+                    }
+                  >
+
+                  ${addon.name}
+                </span>
+
+                <b>
+                  + ${money(addon.price)}
+                </b>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+      `
+      : '';
+
+    let selectionMessage = '';
+
+    if (product.product_type === 'configurable') {
+      const allSelected =
+        Object.keys(selectedValues).length ===
+        groups.length;
+
+      if (!allSelected) {
+        selectionMessage =
+          'Please choose all required options.';
+      } else if (!variant) {
+        selectionMessage =
+          'This combination is currently unavailable.';
+      } else {
+        selectionMessage =
+          variant.name;
+      }
+    }
+
+    const html = `
+      <div class="modal-head">
+        <div>
+          <h3>${product.name}</h3>
+
+          ${
+            product.product_type === 'configurable'
+              ? `
+                <small class="text-muted">
+                  Customize your order
+                </small>
+              `
+              : ''
+          }
+        </div>
+
+        <button
+          class="close-btn"
+          id="closeProductModal"
+        >
+          ×
+        </button>
+      </div>
+
+      <div class="modal-body product-config-body">
+        ${
+          optionHtml
+        }
+
+        ${
+          product.product_type === 'configurable'
+            ? `
+              <div
+                class="
+                  product-variant-message
+                  ${variant ? 'valid' : ''}
+                "
+              >
+                ${selectionMessage}
+              </div>
+            `
+            : ''
+        }
+
+        ${addonHtml}
+      </div>
+
+      <div class="modal-foot product-config-foot">
+        <div class="product-config-price">
+          <small>Total</small>
+
+          <strong>
+            ${
+              finalPrice === null
+                ? 'Select options'
+                : money(finalPrice)
+            }
+          </strong>
+        </div>
+
+        <button
+          type="button"
+          class="btn primary lg"
+          id="addConfiguredProduct"
+          ${
+            product.product_type === 'configurable' &&
+            !variant
+              ? 'disabled'
+              : ''
+          }
+        >
+          Add to Cart
+        </button>
+      </div>
+    `;
+
+    $('#modalRoot').innerHTML = `
+      <div class="modal-backdrop">
+        <div class="modal product-config-modal">
+          ${html}
+        </div>
+      </div>
+    `;
+
+    $('#closeProductModal')
+      ?.addEventListener(
+        'click',
+        () => {
+          $('#modalRoot').innerHTML = '';
+        }
+      );
+
+    $$('#modalRoot .product-option-btn')
+      .forEach(button => {
+        button.addEventListener(
+          'click',
+          () => {
+            selectedValues[
+              +button.dataset.group
+            ] = +button.dataset.value;
+
+            renderModal();
+          }
+        );
+      });
+
+    $$(
+      '#modalRoot input[data-addon]'
+    ).forEach(input => {
+      input.addEventListener(
+        'change',
+        () => {
+          const addonId =
+            +input.dataset.addon;
+
+          if (input.checked) {
+            selectedAddonIds.add(addonId);
+          } else {
+            selectedAddonIds.delete(addonId);
+          }
+
+          renderModal();
+        }
+      );
+    });
+
+    $('#addConfiguredProduct')
+      ?.addEventListener(
+        'click',
+        () => {
+          const chosenVariant =
+            selectedVariant();
+
+          if (
+            product.product_type ===
+              'configurable' &&
+            !chosenVariant
+          ) {
+            return;
+          }
+
+          const chosenAddons =
+            addons.filter(
+              addon =>
+                selectedAddonIds.has(
+                  +addon.id
+                )
+            );
+
+          addConfiguredItemToCart(
+            product,
+            chosenVariant,
+            chosenAddons
+          );
+
+          $('#modalRoot').innerHTML = '';
+        }
+      );
+  }
+
+  renderModal();
 }
 
 function refreshCartBar() {
@@ -388,8 +875,37 @@ function openCart() {
     <div class="modal-head"><h3>🛒 Your Order</h3><button class="close-btn" onclick="document.getElementById('modalRoot').innerHTML=''">×</button></div>
     <div class="modal-body">
       ${cart.length===0 ? '<div class="empty"><span class="em">🛒</span>Cart is empty</div>' : ''}
-      ${cart.map((it,i)=>`<div class="cart-item">
-        <div class="info"><b>${it.name}</b><small>${money(it.price)} × ${it.qty}</small></div>
+      ${cart.map((it,i)=>`
+        <div class="cart-item">
+          <div class="info">
+            <b>${it.name}</b>
+
+            ${
+              it.variantName
+                ? `
+                  <small class="cart-config">
+                    ${it.variantName}
+                  </small>
+                `
+                : ''
+            }
+
+            ${
+              (it.addonNames || []).length
+                ? `
+                  <small class="cart-config">
+                    ${it.addonNames
+                      .map(name => `+ ${name}`)
+                      .join('<br>')}
+                  </small>
+                `
+                : ''
+            }
+
+            <small>
+              ${money(it.price)} × ${it.qty}
+            </small>
+          </div>
         <div class="qty-ctrl">
           <button data-act="dec" data-i="${i}">−</button>
           <span>${it.qty}</span>
@@ -690,8 +1206,17 @@ async function placeOrder() {
       '/orders',
       {
         items: cart.map(c => ({
-          product_id: c.productId,
-          qty: c.qty
+          product_id:
+            c.productId,
+
+          product_variant_id:
+            c.productVariantId || null,
+
+          addon_ids:
+            c.addonIds || [],
+
+          qty:
+            c.qty
         })),
 
         table_id: tableId,

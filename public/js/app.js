@@ -91,6 +91,66 @@ function closeModal() { $('#modalRoot').innerHTML = ''; }
 // Decimal fields from Laravel come as strings; normalize for arithmetic
 function num(v) { return v === null || v === undefined ? 0 : +v; }
 
+function orderItemConfigHtml(
+  item,
+  options = {}
+) {
+  const compact =
+    options.compact ?? false;
+
+  const addons =
+    Array.isArray(item.addons)
+      ? item.addons
+      : [];
+
+  const fontSize =
+    compact
+      ? '10px'
+      : '12px';
+
+  return `
+    ${
+      item.variant_name
+        ? `
+          <div
+            style="
+              margin-top:3px;
+              font-size:${fontSize};
+              color:var(--text-soft);
+              font-weight:600;
+            "
+          >
+            ${item.variant_name}
+          </div>
+        `
+        : ''
+    }
+
+    ${
+      addons.length
+        ? `
+          <div
+            style="
+              margin-top:3px;
+              font-size:${fontSize};
+              line-height:1.45;
+            "
+          >
+            ${
+              addons
+                .map(
+                  addon =>
+                    `+ ${addon.name}`
+                )
+                .join('<br>')
+            }
+          </div>
+        `
+        : ''
+    }
+  `;
+}
+
 // ---------- Initial data load ---------- //
 async function loadInitial() {
   try {
@@ -108,7 +168,32 @@ async function loadInitial() {
       API.get('/loyalty-tiers'),
     ]);
     state.categories = menu.categories;
-    state.products   = menu.products.map(p => ({ ...p, price: num(p.price), cost: num(p.cost) }));
+    state.products = menu.products.map(p => ({
+      ...p,
+
+      price:
+        num(p.price),
+
+      cost:
+        num(p.cost),
+
+      option_groups:
+        p.option_groups || [],
+
+      variants:
+        (p.variants || []).map(v => ({
+          ...v,
+          price: num(v.price),
+          option_values:
+            v.option_values || [],
+        })),
+
+      addons:
+        (p.addons || []).map(a => ({
+          ...a,
+          price: num(a.price),
+        })),
+    }));
     state.tables     = tables;
     state.customers  = customers;
     state.promotions = promos;
@@ -760,6 +845,60 @@ VIEWS.pos = async (root) => {
     }));
   }
 
+  function posProductAvailable(product) {
+    if (!product.available) {
+      return false;
+    }
+
+    if (
+      product.product_type !==
+      'configurable'
+    ) {
+      return true;
+    }
+
+    return (product.variants || [])
+      .some(
+        variant =>
+          variant.available
+      );
+  }
+
+
+  function posProductPriceLabel(
+    product
+  ) {
+    if (
+      product.product_type !==
+      'configurable'
+    ) {
+      return money(product.price);
+    }
+
+    const prices =
+      (product.variants || [])
+        .filter(
+          variant =>
+            variant.available
+        )
+        .map(
+          variant =>
+            num(variant.price)
+        );
+
+    if (!prices.length) {
+      return 'Sold Out';
+    }
+
+    return (
+      'From ' +
+      money(
+        Math.min(...prices)
+      )
+    );
+  }
+
+
   function renderProductGrid() {
     const searchTerm =
       $('#posProductSearch')
@@ -770,26 +909,37 @@ VIEWS.pos = async (root) => {
     let products;
 
     if (searchTerm) {
-      products = state.products.filter(
-        p =>
-          p.name
-            .toLowerCase()
-            .includes(searchTerm)
-      );
+      products =
+        state.products.filter(
+          p =>
+            p.visible !== false &&
+            p.name
+              .toLowerCase()
+              .includes(searchTerm)
+        );
     }
     else {
-      products = state.products.filter(
-        p =>
-          p.category_id === pos.categoryId
-      );
+      products =
+        state.products.filter(
+          p =>
+            p.visible !== false &&
+            p.category_id ===
+              pos.categoryId
+        );
     }
 
     if (products.length === 0) {
       $('#prodGrid').innerHTML = `
         <div class="pos-no-products">
-          <span class="pos-no-products-icon">🔎</span>
+          <span
+            class="pos-no-products-icon"
+          >
+            🔎
+          </span>
 
-          <b>No menu items found</b>
+          <b>
+            No menu items found
+          </b>
 
           <small>
             ${
@@ -806,6 +956,9 @@ VIEWS.pos = async (root) => {
 
     $('#prodGrid').innerHTML =
       products.map(p => {
+        const orderable =
+          posProductAvailable(p);
+
         const visual =
           p.image_url
             ? `
@@ -816,25 +969,40 @@ VIEWS.pos = async (root) => {
               >
             `
             : `
-              <span class="product-emoji">
+              <span
+                class="product-emoji"
+              >
                 ${p.image || '🍽'}
               </span>
             `;
 
         return `
           <button
-            class="product-card ${p.available ? '' : 'unavail'}"
+            class="
+              product-card
+              ${
+                orderable
+                  ? ''
+                  : 'unavail'
+              }
+            "
             data-id="${p.id}"
             type="button"
-            ${p.available ? '' : 'aria-disabled="true"'}
+            ${
+              orderable
+                ? ''
+                : 'aria-disabled="true"'
+            }
           >
             <div class="product-visual">
               ${visual}
 
               ${
-                !p.available
+                !orderable
                   ? `
-                    <span class="product-sold-out">
+                    <span
+                      class="product-sold-out"
+                    >
                       Sold Out
                     </span>
                   `
@@ -843,73 +1011,628 @@ VIEWS.pos = async (root) => {
             </div>
 
             <div class="product-details">
+
               <div class="product-info">
+
                 <span class="name">
                   ${p.name}
                 </span>
 
                 <span class="price">
-                  ${money(p.price)}
+                  ${posProductPriceLabel(p)}
                 </span>
+
               </div>
 
               ${
-                p.available
+                orderable
                   ? `
                     <span
                       class="product-add"
                       aria-hidden="true"
                     >
-                      +
+                      ${
+                        p.product_type ===
+                          'configurable' ||
+                        (p.addons || [])
+                          .length > 0
+                          ? '›'
+                          : '+'
+                      }
                     </span>
                   `
                   : ''
               }
+
             </div>
           </button>
         `;
       }).join('');
 
-    $$('#prodGrid .product-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const p =
-          state.products.find(
-            x =>
-              x.id === +card.dataset.id
-          );
+    $$('#prodGrid .product-card')
+      .forEach(card => {
 
-        if (!p || !p.available) {
-          toast(
-            'Item not available',
-            'warn'
-          );
+        card.addEventListener(
+          'click',
+          () => {
 
-          return;
-        }
+            const product =
+              state.products.find(
+                x =>
+                  x.id ===
+                  +card.dataset.id
+              );
 
-        const ex =
-          pos.cart.find(
-            x =>
-              x.productId === p.id
-          );
+            if (
+              !product ||
+              !posProductAvailable(product)
+            ) {
+              toast(
+                'Item not available',
+                'warn'
+              );
 
-        if (ex) {
-          ex.qty += 1;
-        }
-        else {
-          pos.cart.push({
-            productId: p.id,
-            name: p.name,
-            price: p.price,
-            qty: 1,
-          });
-        }
+              return;
+            }
 
-        clearAppliedPromo();
+            if (
+              product.product_type ===
+                'configurable' ||
+              (product.addons || [])
+                .length > 0
+            ) {
+              openPosProductConfigurator(
+                product
+              );
 
-        renderCart();
+              return;
+            }
+
+            addPosConfiguredItem(
+              product,
+              null,
+              []
+            );
+          }
+        );
       });
-    });
+  }
+
+  function addPosConfiguredItem(
+    product,
+    variant = null,
+    addons = []
+  ) {
+    const addonIds =
+      addons
+        .map(
+          addon =>
+            Number(addon.id)
+        )
+        .sort(
+          (a, b) => a - b
+        );
+
+    const addonTotal =
+      addons.reduce(
+        (sum, addon) =>
+          sum +
+          num(addon.price),
+        0
+      );
+
+    const basePrice =
+      variant
+        ? num(variant.price)
+        : num(product.price);
+
+    const unitPrice =
+      r2(
+        basePrice +
+        addonTotal
+      );
+
+    const key = [
+      product.id,
+      variant?.id || 0,
+      addonIds.join('-'),
+    ].join(':');
+
+    const existing =
+      pos.cart.find(
+        item =>
+          item.key === key
+      );
+
+    if (existing) {
+      existing.qty += 1;
+    }
+    else {
+      pos.cart.push({
+        key,
+
+        productId:
+          product.id,
+
+        productVariantId:
+          variant?.id || null,
+
+        addonIds,
+
+        name:
+          product.name,
+
+        variantName:
+          variant?.name || null,
+
+        addonNames:
+          addons.map(
+            addon =>
+              addon.name
+          ),
+
+        price:
+          unitPrice,
+
+        qty:
+          1,
+      });
+    }
+
+    clearAppliedPromo();
+
+    renderCart();
+  }
+
+
+  function openPosProductConfigurator(
+    product
+  ) {
+    const groups =
+      product.option_groups || [];
+
+    const variants =
+      product.variants || [];
+
+    const addons =
+      (product.addons || [])
+        .filter(
+          addon =>
+            addon.available
+        );
+
+    const selectedValues = {};
+    const selectedAddonIds =
+      new Set();
+
+
+    function selectedVariant() {
+      if (
+        product.product_type !==
+        'configurable'
+      ) {
+        return null;
+      }
+
+      const selectedIds =
+        Object.values(
+          selectedValues
+        )
+          .map(Number)
+          .sort(
+            (a, b) => a - b
+          );
+
+      if (
+        selectedIds.length !==
+        groups.length
+      ) {
+        return null;
+      }
+
+      return variants.find(
+        variant => {
+
+          if (!variant.available) {
+            return false;
+          }
+
+          const variantIds =
+            (
+              variant.option_values ||
+              []
+            )
+              .map(
+                value =>
+                  Number(value.id)
+              )
+              .sort(
+                (a, b) =>
+                  a - b
+              );
+
+          return (
+            variantIds.length ===
+              selectedIds.length &&
+            variantIds.every(
+              (id, index) =>
+                id ===
+                selectedIds[index]
+            )
+          );
+        }
+      ) || null;
+    }
+
+
+    function drawConfigurator() {
+      const variant =
+        selectedVariant();
+
+      const selectedAddons =
+        addons.filter(
+          addon =>
+            selectedAddonIds.has(
+              Number(addon.id)
+            )
+        );
+
+      const addonTotal =
+        selectedAddons.reduce(
+          (sum, addon) =>
+            sum +
+            num(addon.price),
+          0
+        );
+
+      const basePrice =
+        product.product_type ===
+          'configurable'
+          ? (
+              variant
+                ? num(variant.price)
+                : null
+            )
+          : num(product.price);
+
+      const total =
+        basePrice === null
+          ? null
+          : r2(
+              basePrice +
+              addonTotal
+            );
+
+
+      openModal(`
+        <div class="modal-head">
+
+          <div>
+            <h3>
+              ${product.name}
+            </h3>
+
+            <small
+              class="text-muted"
+            >
+              Configure item
+            </small>
+          </div>
+
+          <button
+            class="close-btn"
+            onclick="closeModal()"
+          >
+            ×
+          </button>
+
+        </div>
+
+
+        <div class="modal-body">
+
+          ${
+            groups.map(
+              group => `
+                <div
+                  class="form-section"
+                >
+
+                  <div
+                    class="form-section-title"
+                  >
+                    ${group.name}
+                    ${
+                      group.required
+                        ? '*'
+                        : ''
+                    }
+                  </div>
+
+                  <div
+                    class="product-option-values"
+                  >
+
+                    ${
+                      (
+                        group.values ||
+                        []
+                      ).map(
+                        value => `
+                          <button
+                            type="button"
+                            class="
+                              product-option-btn
+                              ${
+                                selectedValues[
+                                  group.id
+                                ] ===
+                                value.id
+                                  ? 'selected'
+                                  : ''
+                              }
+                            "
+                            data-pos-group="
+                              ${group.id}
+                            "
+                            data-pos-value="
+                              ${value.id}
+                            "
+                            ${
+                              value.available
+                                ? ''
+                                : 'disabled'
+                            }
+                          >
+                            ${value.name}
+
+                            ${
+                              value.available
+                                ? ''
+                                : '<small>Sold Out</small>'
+                            }
+                          </button>
+                        `
+                      ).join('')
+                    }
+
+                  </div>
+
+                </div>
+              `
+            ).join('')
+          }
+
+
+          ${
+            product.product_type ===
+              'configurable'
+              ? `
+                <div
+                  class="
+                    product-variant-message
+                    ${
+                      variant
+                        ? 'valid'
+                        : ''
+                    }
+                  "
+                >
+                  ${
+                    variant
+                      ? variant.name
+                      : 'Select all required options.'
+                  }
+                </div>
+              `
+              : ''
+          }
+
+
+          ${
+            addons.length
+              ? `
+                <div
+                  class="form-section"
+                >
+
+                  <div
+                    class="form-section-title"
+                  >
+                    ⚡ Boost It Up!
+                  </div>
+
+                  <div
+                    class="product-addon-list"
+                  >
+
+                    ${addons.map(
+                      addon => `
+                        <label
+                          class="
+                            product-addon-row
+                          "
+                        >
+
+                          <span>
+                            <input
+                              type="checkbox"
+                              data-pos-addon="
+                                ${addon.id}
+                              "
+                              ${
+                                selectedAddonIds
+                                  .has(
+                                    Number(
+                                      addon.id
+                                    )
+                                  )
+                                  ? 'checked'
+                                  : ''
+                              }
+                            >
+
+                            ${addon.name}
+                          </span>
+
+                          <b>
+                            + ${money(
+                              addon.price
+                            )}
+                          </b>
+
+                        </label>
+                      `
+                    ).join('')}
+
+                  </div>
+
+                </div>
+              `
+              : ''
+          }
+
+        </div>
+
+
+        <div
+          class="
+            modal-foot
+            product-config-foot
+          "
+        >
+
+          <div
+            class="product-config-price"
+          >
+            <small>
+              Item Price
+            </small>
+
+            <strong>
+              ${
+                total === null
+                  ? 'Select options'
+                  : money(total)
+              }
+            </strong>
+          </div>
+
+          <button
+            class="btn primary lg"
+            id="posAddConfigured"
+            ${
+              product.product_type ===
+                'configurable' &&
+              !variant
+                ? 'disabled'
+                : ''
+            }
+          >
+            Add to Order
+          </button>
+
+        </div>
+      `, {
+        size: 'lg',
+      });
+
+
+      $$(
+        '[data-pos-group]'
+      ).forEach(
+        button => {
+
+          button.addEventListener(
+            'click',
+            () => {
+
+              selectedValues[
+                Number(
+                  button.dataset
+                    .posGroup
+                )
+              ] =
+                Number(
+                  button.dataset
+                    .posValue
+                );
+
+              drawConfigurator();
+            }
+          );
+        }
+      );
+
+
+      $$(
+        '[data-pos-addon]'
+      ).forEach(
+        input => {
+
+          input.addEventListener(
+            'change',
+            () => {
+
+              const addonId =
+                Number(
+                  input.dataset
+                    .posAddon
+                );
+
+              if (input.checked) {
+                selectedAddonIds
+                  .add(addonId);
+              }
+              else {
+                selectedAddonIds
+                  .delete(addonId);
+              }
+
+              drawConfigurator();
+            }
+          );
+        }
+      );
+
+
+      $('#posAddConfigured')
+        ?.addEventListener(
+          'click',
+          () => {
+
+            const chosenVariant =
+              selectedVariant();
+
+            if (
+              product.product_type ===
+                'configurable' &&
+              !chosenVariant
+            ) {
+              return;
+            }
+
+            const chosenAddons =
+              addons.filter(
+                addon =>
+                  selectedAddonIds.has(
+                    Number(addon.id)
+                  )
+              );
+
+            addPosConfiguredItem(
+              product,
+              chosenVariant,
+              chosenAddons
+            );
+
+            closeModal();
+          }
+        );
+    }
+
+
+    drawConfigurator();
   }
 
   function renderCart() {
@@ -999,9 +1722,54 @@ VIEWS.pos = async (root) => {
       <div class="cart-item">
 
         <div class="info">
-          <b>${it.name}</b>
-          <small>${money(it.price)} each</small>
-          <strong>${money(it.price*it.qty)}</strong>
+
+          <b>
+            ${it.name}
+          </b>
+
+          ${
+            it.variantName
+              ? `
+                <small
+                  class="cart-config"
+                >
+                  ${it.variantName}
+                </small>
+              `
+              : ''
+          }
+
+          ${
+            (it.addonNames || [])
+              .length
+              ? `
+                <small
+                  class="cart-config"
+                >
+                  ${
+                    it.addonNames
+                      .map(
+                        name =>
+                          `+ ${name}`
+                      )
+                      .join('<br>')
+                  }
+                </small>
+              `
+              : ''
+          }
+
+          <small>
+            ${money(it.price)} each
+          </small>
+
+          <strong>
+            ${money(
+              it.price *
+              it.qty
+            )}
+          </strong>
+
         </div>
 
         <div class="qty-ctrl">
@@ -1340,6 +2108,124 @@ VIEWS.pos = async (root) => {
         </div>
 
         <div class="card" style="margin-bottom:16px">
+          <div
+            class="pos-payment-preview"
+            style="
+              margin-bottom:16px;
+            "
+          >
+            <div
+              class="section-title"
+              style="margin-bottom:10px"
+            >
+              Order Preview
+            </div>
+
+            <div
+              style="
+                display:flex;
+                flex-direction:column;
+                gap:10px;
+              "
+            >
+              ${
+                pos.cart.map(item => `
+                  <div
+                    style="
+                      border:1px solid var(--border);
+                      border-radius:10px;
+                      padding:12px 14px;
+                      background:#fff;
+                    "
+                  >
+                    <div
+                      style="
+                        display:flex;
+                        justify-content:space-between;
+                        gap:12px;
+                        align-items:flex-start;
+                      "
+                    >
+                      <div>
+                        <b>
+                          ${item.qty} × ${item.name}
+                        </b>
+
+                        ${
+                          item.variantName
+                            ? `
+                              <div
+                                class="text-muted"
+                                style="
+                                  font-size:12px;
+                                  margin-top:4px;
+                                "
+                              >
+                                ${item.variantName}
+                              </div>
+                            `
+                            : ''
+                        }
+
+                        ${
+                          (item.addonNames || []).length
+                            ? `
+                              <div
+                                style="
+                                  font-size:12px;
+                                  margin-top:4px;
+                                "
+                              >
+                                ${
+                                  item.addonNames
+                                    .map(
+                                      name =>
+                                        `+ ${name}`
+                                    )
+                                    .join('<br>')
+                                }
+                              </div>
+                            `
+                            : ''
+                        }
+                      </div>
+
+                      <div
+                        style="
+                          text-align:right;
+                          white-space:nowrap;
+                        "
+                      >
+                        <b>
+                          ${money(
+                            item.price *
+                            item.qty
+                          )}
+                        </b>
+
+                        ${
+                          item.qty > 1
+                            ? `
+                              <div
+                                class="text-muted"
+                                style="
+                                  font-size:11px;
+                                  margin-top:3px;
+                                "
+                              >
+                                ${money(item.price)}
+                                each
+                              </div>
+                            `
+                            : ''
+                        }
+                      </div>
+                    </div>
+                  </div>
+                `).join('')
+              }
+            </div>
+          </div>
           <div class="cart-summary">
 
             <div class="sum-line">
@@ -1781,6 +2667,12 @@ VIEWS.pos = async (root) => {
                   product_id:
                     c.productId,
 
+                  product_variant_id:
+                    c.productVariantId || null,
+
+                  addon_ids:
+                    c.addonIds || [],
+
                   qty:
                     c.qty
                 })
@@ -1947,37 +2839,35 @@ VIEWS.pos = async (root) => {
 
         ${
           order.items.map(
-            it => `
-              <div>
+            item => `
+              <div
+                style="
+                  margin-bottom:8px;
+                "
+              >
 
                 <div class="item-row">
+
                   <b>
-                    ${it.name}
+                    ${item.qty} ×
+                    ${item.name}
                   </b>
 
-                  <span></span>
-                </div>
-
-                <div class="item-row">
-
                   <span>
-                    ${it.qty}
-                    x
-                    ${state.meta.currency}
-                    ${num(it.price).toFixed(2)}
-                  </span>
-
-                  <span>
-                    ${state.meta.currency}
-                    ${
-                      (
-                        it.qty *
-                        num(it.price)
-                      ).toFixed(2)
-                    }
+                    ${money(
+                      num(item.price) *
+                      item.qty
+                    )}
                   </span>
 
                 </div>
+
+                ${orderItemConfigHtml(
+                  item,
+                  {
+                    compact: true,
+                  }
+                )}
 
               </div>
             `
@@ -2354,19 +3244,222 @@ VIEWS.kds = async (root) => {
   }, 1000);
 };
 
-function kdsCard(o, isNew = false) {
-  const next = o.kitchen_status==='pending' ? 'preparing' : o.kitchen_status==='preparing' ? 'ready' : 'completed';
-  const btnLabel = o.kitchen_status==='pending'?'Start Preparing':o.kitchen_status==='preparing'?'Mark Ready':'Mark Picked Up';
-  return `<div class="kds-card ${o.kitchen_status} ${isNew?'kds-new':''}">
-    <div class="head">
-      <div><b>${o.order_no}</b> ${isNew?'<span class="badge badge-success" style="margin-left:6px">NEW</span>':''}<div style="font-size:11.5px;color:#6b7280">${o.channel.toUpperCase()}${o.table_id?' · '+(o.table?.name||''):''} · ${o.customer_name||''}</div></div>
-      <div class="time">${fmtTimeAgo(o.created_at)}</div>
+function kdsCard(
+  o,
+  isNew = false
+) {
+  const next =
+    o.kitchen_status === 'pending'
+      ? 'preparing'
+      : o.kitchen_status === 'preparing'
+        ? 'ready'
+        : 'completed';
+
+  const btnLabel =
+    o.kitchen_status === 'pending'
+      ? 'Start Preparing'
+      : o.kitchen_status === 'preparing'
+        ? 'Mark Ready'
+        : 'Mark Picked Up';
+
+
+  const itemsHtml =
+    o.items.map(item => {
+
+      const addons =
+        Array.isArray(item.addons)
+          ? item.addons
+          : [];
+
+      return `
+        <li
+          style="
+            display:block;
+            padding:10px 0;
+          "
+        >
+
+          <div
+            style="
+              display:flex;
+              align-items:flex-start;
+              gap:8px;
+            "
+          >
+
+            <b
+              style="
+                min-width:30px;
+                font-size:16px;
+              "
+            >
+              ${item.qty}×
+            </b>
+
+            <div
+              style="
+                flex:1;
+                min-width:0;
+              "
+            >
+
+              <div
+                style="
+                  font-weight:700;
+                  font-size:15px;
+                "
+              >
+                ${item.name}
+              </div>
+
+
+              ${
+                item.variant_name
+                  ? `
+                    <div
+                      style="
+                        margin-top:4px;
+                        font-size:13px;
+                        font-weight:600;
+                        color:var(--text-soft);
+                      "
+                    >
+                      ${item.variant_name}
+                    </div>
+                  `
+                  : ''
+              }
+
+
+              ${
+                addons.length
+                  ? `
+                    <div
+                      style="
+                        margin-top:5px;
+                        display:flex;
+                        flex-direction:column;
+                        gap:2px;
+                        font-size:12px;
+                      "
+                    >
+                      ${
+                        addons.map(
+                          addon => `
+                            <span>
+                              + ${addon.name}
+                            </span>
+                          `
+                        ).join('')
+                      }
+                    </div>
+                  `
+                  : ''
+              }
+
+            </div>
+
+          </div>
+
+        </li>
+      `;
+    }).join('');
+
+
+  return `
+    <div
+      class="
+        kds-card
+        ${o.kitchen_status}
+        ${isNew ? 'kds-new' : ''}
+      "
+    >
+
+      <div class="head">
+
+        <div>
+
+          <b>
+            ${o.order_no}
+          </b>
+
+          ${
+            isNew
+              ? `
+                <span
+                  class="
+                    badge
+                    badge-success
+                  "
+                  style="
+                    margin-left:6px;
+                  "
+                >
+                  NEW
+                </span>
+              `
+              : ''
+          }
+
+          <div
+            style="
+              font-size:11.5px;
+              color:#6b7280;
+            "
+          >
+            ${o.channel.toUpperCase()}
+
+            ${
+              o.table_id
+                ? ' · ' +
+                  (
+                    o.table?.name ||
+                    ''
+                  )
+                : ''
+            }
+
+            ${
+              o.customer_name
+                ? ' · ' +
+                  o.customer_name
+                : ''
+            }
+          </div>
+
+        </div>
+
+
+        <div class="time">
+          ${fmtTimeAgo(o.created_at)}
+        </div>
+
+      </div>
+
+
+      <ul class="kds-items">
+        ${itemsHtml}
+      </ul>
+
+
+      <div class="kds-actions">
+
+        <button
+          class="
+            btn
+            primary
+            block
+          "
+          data-id="${o.id}"
+          data-next="${next}"
+        >
+          ${btnLabel}
+        </button>
+
+      </div>
+
     </div>
-    <ul class="kds-items">${o.items.map(it=>`<li><span><b>${it.qty}×</b> ${it.name}</span></li>`).join('')}</ul>
-    <div class="kds-actions">
-      <button class="btn primary block" data-id="${o.id}" data-next="${next}">${btnLabel}</button>
-    </div>
-  </div>`;
+  `;
 }
 
 /* ===== ORDERS LIST (auto-refreshing) ===== */
@@ -2492,33 +3585,396 @@ VIEWS.orders = async (root) => {
 
 async function viewOrderDetail(orderId) {
   try {
-    const o = await API.get('/orders/' + orderId);
-    const isPending = o.status === 'pending_payment';
+    const o =
+      await API.get(
+        '/orders/' + orderId
+      );
+
+    const isPending =
+      o.status ===
+      'pending_payment';
+
     openModal(`
-      <div class="modal-head"><h3>Order ${o.order_no}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-      <div class="modal-body">
-        <div class="alert alert-info">${fmtDate(o.created_at)} · ${o.channel.toUpperCase()}${o.table_id?' · Table '+(o.table?.name||o.table_id):''} · ${o.customer_name||''}</div>
-        ${isPending ? `<div class="alert alert-warn"><b>⏳ Awaiting payment at counter</b> — total due: <b>${money(o.total)}</b></div>` : ''}
-        <table class="data"><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Subtotal</th></tr></thead>
-          <tbody>${o.items.map(it=>`<tr><td>${it.name}</td><td class="text-right">${it.qty}</td><td class="text-right">${money(it.price)}</td><td class="text-right">${money(it.qty*num(it.price))}</td></tr>`).join('')}</tbody>
-          <tfoot>
-            <tr><td colspan="3" class="text-right">Subtotal</td><td class="text-right">${money(o.subtotal)}</td></tr>
-            <tr><td colspan="3" class="text-right">Discount</td><td class="text-right">-${money(o.discount)}</td></tr>
-            <tr><td colspan="3" class="text-right">Tax</td><td class="text-right">${money(o.tax)}</td></tr>
-            <tr><td colspan="3" class="text-right"><b>Total</b></td><td class="text-right"><b>${money(o.total)}</b></td></tr>
-          </tfoot>
-        </table>
-        <p class="mt-3">Status: <span class="badge badge-${o.status==='completed'?'success':o.status==='refunded'?'danger':'warn'}">${o.status}</span> · Kitchen: <span class="badge">${o.kitchen_status||'—'}</span></p>
-        ${o.payment?`<p>Paid by: <b>${o.payment.method.toUpperCase()}</b> · ${o.payment.reference||''}</p>`:''}
-        ${o.notes?`<p class="text-muted"><b>Notes:</b> ${o.notes}</p>`:''}
+      <div class="modal-head">
+
+        <div>
+          <h3>
+            Order ${o.order_no}
+          </h3>
+
+          <small class="text-muted">
+            Order Details
+          </small>
+        </div>
+
+        <button
+          class="close-btn"
+          onclick="closeModal()"
+        >
+          ×
+        </button>
+
       </div>
+
+
+      <div class="modal-body">
+
+        <div class="alert alert-info">
+
+          ${fmtDate(o.created_at)}
+
+          ·
+
+          ${o.channel.toUpperCase()}
+
+          ${
+            o.table_id
+              ? ' · ' +
+                (
+                  o.table?.name ||
+                  o.table_id
+                )
+              : ''
+          }
+
+          ${
+            o.customer_name
+              ? ' · ' +
+                o.customer_name
+              : ''
+          }
+
+        </div>
+
+
+        ${
+          isPending
+            ? `
+              <div class="alert alert-warn">
+
+                <b>
+                  ⏳ Awaiting payment
+                  at counter
+                </b>
+
+                <br>
+
+                Total due:
+
+                <b>
+                  ${money(o.total)}
+                </b>
+
+              </div>
+            `
+            : ''
+        }
+
+
+        <div class="card">
+
+          <table class="data">
+
+            <thead>
+              <tr>
+                <th>
+                  Item
+                </th>
+
+                <th
+                  class="text-right"
+                >
+                  Qty
+                </th>
+
+                <th
+                  class="text-right"
+                >
+                  Price
+                </th>
+
+                <th
+                  class="text-right"
+                >
+                  Subtotal
+                </th>
+              </tr>
+            </thead>
+
+
+            <tbody>
+
+              ${
+                o.items.map(
+                  item => `
+                    <tr>
+
+                      <td>
+
+                        <b>
+                          ${item.name}
+                        </b>
+
+                        ${orderItemConfigHtml(
+                          item
+                        )}
+
+                      </td>
+
+                      <td
+                        class="text-right"
+                      >
+                        ${item.qty}
+                      </td>
+
+                      <td
+                        class="text-right"
+                      >
+                        ${money(
+                          item.price
+                        )}
+                      </td>
+
+                      <td
+                        class="text-right"
+                      >
+                        <b>
+                          ${money(
+                            item.qty *
+                            num(
+                              item.price
+                            )
+                          )}
+                        </b>
+                      </td>
+
+                    </tr>
+                  `
+                ).join('')
+              }
+
+            </tbody>
+
+
+            <tfoot>
+
+              <tr>
+                <td
+                  colspan="3"
+                  class="text-right"
+                >
+                  Subtotal
+                </td>
+
+                <td
+                  class="text-right"
+                >
+                  ${money(o.subtotal)}
+                </td>
+              </tr>
+
+
+              ${
+                num(o.discount) > 0
+                  ? `
+                    <tr>
+
+                      <td
+                        colspan="3"
+                        class="text-right"
+                      >
+                        Discount
+                      </td>
+
+                      <td
+                        class="text-right"
+                      >
+                        -${money(
+                          o.discount
+                        )}
+                      </td>
+
+                    </tr>
+                  `
+                  : ''
+              }
+
+
+              <tr>
+
+                <td
+                  colspan="3"
+                  class="text-right"
+                >
+                  Tax
+                </td>
+
+                <td
+                  class="text-right"
+                >
+                  ${money(o.tax)}
+                </td>
+
+              </tr>
+
+
+              <tr>
+
+                <td
+                  colspan="3"
+                  class="text-right"
+                >
+                  <b>
+                    Total
+                  </b>
+                </td>
+
+                <td
+                  class="text-right"
+                >
+                  <b>
+                    ${money(o.total)}
+                  </b>
+                </td>
+
+              </tr>
+
+            </tfoot>
+
+          </table>
+
+        </div>
+
+
+        <p class="mt-3">
+
+          Status:
+
+          <span
+            class="
+              badge
+              badge-${
+                o.status === 'completed'
+                  ? 'success'
+                  : o.status ===
+                    'refunded'
+                    ? 'danger'
+                    : 'warn'
+              }
+            "
+          >
+            ${o.status}
+          </span>
+
+          · Kitchen:
+
+          <span class="badge">
+            ${o.kitchen_status || '—'}
+          </span>
+
+        </p>
+
+
+        ${
+          o.payment
+            ? `
+              <p>
+
+                Paid by:
+
+                <b>
+                  ${o.payment.method
+                    .toUpperCase()}
+                </b>
+
+                ·
+
+                ${
+                  o.payment.reference ||
+                  ''
+                }
+
+              </p>
+            `
+            : ''
+        }
+
+
+        ${
+          o.notes
+            ? `
+              <p class="text-muted">
+
+                <b>
+                  Notes:
+                </b>
+
+                ${o.notes}
+
+              </p>
+            `
+            : ''
+        }
+
+      </div>
+
+
       <div class="modal-foot">
-        ${isPending ? `<button class="btn primary lg" onclick="app.takePayment(${o.id})">💳 Take Payment</button>` : ''}
-        ${o.status==='completed'?`<button class="btn danger" onclick="app.initRefund(${o.id})">↩ Refund</button>`:''}
-        <button class="btn" onclick="closeModal()">Close</button>
-      </div>`);
-  } catch (err) {
-    toast('Could not load order', 'error');
+
+        ${
+          isPending
+            ? `
+              <button
+                class="btn primary lg"
+                onclick="
+                  app.takePayment(
+                    ${o.id}
+                  )
+                "
+              >
+                💳 Take Payment
+              </button>
+            `
+            : ''
+        }
+
+
+        ${
+          o.status === 'completed'
+            ? `
+              <button
+                class="btn danger"
+                onclick="
+                  app.initRefund(
+                    ${o.id}
+                  )
+                "
+              >
+                ↩ Refund
+              </button>
+            `
+            : ''
+        }
+
+
+        <button
+          class="btn"
+          onclick="closeModal()"
+        >
+          Close
+        </button>
+
+      </div>
+    `, {
+      size: 'lg'
+    });
+
+  }
+  catch (err) {
+    toast(
+      'Could not load order',
+      'error'
+    );
   }
 }
 
@@ -2537,12 +3993,150 @@ async function takePaymentForOrder(orderId) {
     </div>
     <div class="modal-body">
       <div class="alert alert-info">
-        Customer: <b>${o.customer_name||'Walk-in'}</b>
-        ${o.table_id?' · Table '+(o.table?.name||o.table_id):''}
-        · ${o.items.length} item(s)
+
+        Customer:
+
+        <b>
+          ${o.customer_name || 'Walk-in'}
+        </b>
+
+        ${
+          o.table_id
+            ? ' · Table ' +
+              (
+                o.table?.name ||
+                o.table_id
+              )
+            : ''
+        }
+
+        ·
+
+        ${o.items.length}
+        item(s)
+
       </div>
-      <div style="text-align:center;font-size:28px;font-weight:800;color:#064e3b;margin:18px 0">
-        Total Due: ${money(total)}
+
+
+      <div
+        class="card"
+        style="
+          margin-bottom:16px;
+        "
+      >
+
+        <div
+          class="section-title"
+          style="
+            margin-bottom:10px;
+          "
+        >
+          Order Preview
+        </div>
+
+
+        <div
+          style="
+            display:flex;
+            flex-direction:column;
+            gap:10px;
+          "
+        >
+
+          ${
+            o.items.map(
+              item => `
+                <div
+                  style="
+                    border-bottom:
+                      1px solid
+                      var(--border);
+                    padding-bottom:10px;
+                  "
+                >
+
+                  <div
+                    style="
+                      display:flex;
+                      justify-content:
+                        space-between;
+                      gap:12px;
+                      align-items:flex-start;
+                    "
+                  >
+
+                    <div>
+
+                      <b>
+                        ${item.qty} ×
+                        ${item.name}
+                      </b>
+
+                      ${orderItemConfigHtml(
+                        item
+                      )}
+
+                    </div>
+
+
+                    <div
+                      style="
+                        text-align:right;
+                        white-space:nowrap;
+                      "
+                    >
+
+                      <b>
+                        ${money(
+                          num(item.price) *
+                          item.qty
+                        )}
+                      </b>
+
+                      ${
+                        item.qty > 1
+                          ? `
+                            <div
+                              class="text-muted"
+                              style="
+                                font-size:11px;
+                                margin-top:3px;
+                              "
+                            >
+                              ${money(
+                                item.price
+                              )}
+                              each
+                            </div>
+                          `
+                          : ''
+                      }
+
+                    </div>
+
+                  </div>
+
+                </div>
+              `
+            ).join('')
+          }
+
+        </div>
+
+      </div>
+
+
+      <div
+        style="
+          text-align:center;
+          font-size:28px;
+          font-weight:800;
+          color:#064e3b;
+          margin:18px 0;
+        "
+      >
+        Total Due:
+        ${money(total)}
       </div>
       <div class="section-title">Payment Method</div>
       <div class="payment-grid">
@@ -2660,10 +4254,53 @@ function showCounterReceipt(order, method) {
     ${order.table_id?`<div class="row"><span>Table:</span><span>${state.tables.find(t=>t.id===order.table_id)?.name||''}</span></div>`:''}
     <div class="row"><span>Customer:</span><span>${customer.name}</span></div>
     <div class="sep"></div>
-    ${order.items.map(it=>`<div>
-      <div class="item-row"><b>${it.name}</b><span></span></div>
-      <div class="item-row"><span>  ${it.qty} x ${state.meta.currency}${num(it.price).toFixed(2)}</span><span>${state.meta.currency}${(it.qty*num(it.price)).toFixed(2)}</span></div>
-    </div>`).join('')}
+    ${
+      order.items.map(
+        item => `
+          <div
+            style="
+              margin-bottom:8px;
+            "
+          >
+
+            <div class="item-row">
+
+              <b>
+                ${item.qty} ×
+                ${item.name}
+              </b>
+
+              <span>
+                ${money(
+                  num(item.price) *
+                  item.qty
+                )}
+              </span>
+
+            </div>
+
+            ${orderItemConfigHtml(
+              item,
+              {
+                compact: true,
+              }
+            )}
+
+            <div
+              style="
+                font-size:10px;
+                color:#666;
+                margin-top:2px;
+              "
+            >
+              ${money(item.price)}
+              each
+            </div>
+
+          </div>
+        `
+      ).join('')
+    }
     <div class="sep"></div>
     <div class="row"><span>Subtotal</span><span>${state.meta.currency}${num(order.subtotal).toFixed(2)}</span></div>
     ${num(order.discount)>0?`<div class="row"><span>Discount</span><span>-${state.meta.currency}${num(order.discount).toFixed(2)}</span></div>`:''}
@@ -3732,188 +5369,3176 @@ VIEWS.reports = async (root) => {
   $('#applyDate').addEventListener('click', load);
 };
 
-/* ===== MENU & PRODUCTS (full CRUD) ===== */
+/* ===== MENU & PRODUCTS V2 ===== */
 VIEWS.menu = async (root) => {
-  const [cats, prods] = await Promise.all([API.get('/categories'), API.get('/products')]);
+  const [
+    cats,
+    prods,
+    addons,
+  ] = await Promise.all([
+    API.get('/categories'),
+    API.get('/products'),
+    API.get('/addons'),
+  ]);
+
   state.categories = cats;
-  state.products = prods.map(p => ({ ...p, price: num(p.price), cost: num(p.cost) }));
+
+  state.products = prods.map(p => ({
+    ...p,
+    price: num(p.price),
+    cost: num(p.cost),
+
+    variants: (p.variants || []).map(v => ({
+      ...v,
+      price: num(v.price),
+    })),
+
+    addons: p.addons || [],
+    option_groups: p.option_groups || [],
+  }));
+
+  state.addons = addons.map(a => ({
+    ...a,
+    price: num(a.price),
+  }));
 
   root.innerHTML = `
     <div class="tabs">
-      <button class="tab active" data-tab="prod">Products (${prods.length})</button>
-      <button class="tab" data-tab="cat">Categories (${cats.length})</button>
+      <button
+        class="tab active"
+        data-tab="prod"
+      >
+        Products (${prods.length})
+      </button>
+
+      <button
+        class="tab"
+        data-tab="cat"
+      >
+        Categories (${cats.length})
+      </button>
+
+      <button
+        class="tab"
+        data-tab="addon"
+      >
+        ⚡ Boost It Up! (${addons.length})
+      </button>
     </div>
-    <div id="menuBody"></div>`;
-  $$('.tabs .tab').forEach(t => t.addEventListener('click', () => {
-    $$('.tabs .tab').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    renderTab(t.dataset.tab);
-  }));
+
+    <div id="menuBody"></div>
+  `;
+
+  $$('.tabs .tab').forEach(tab => {
+    tab.addEventListener(
+      'click',
+      () => {
+        $$('.tabs .tab').forEach(x =>
+          x.classList.remove('active')
+        );
+
+        tab.classList.add('active');
+
+        renderTab(tab.dataset.tab);
+      }
+    );
+  });
+
   renderTab('prod');
+
+  function productPriceLabel(product) {
+    if (
+      product.product_type !==
+      'configurable'
+    ) {
+      return money(product.price);
+    }
+
+    const availablePrices =
+      (product.variants || [])
+        .filter(v => v.available)
+        .map(v => num(v.price));
+
+    if (!availablePrices.length) {
+      return '—';
+    }
+
+    return (
+      'From ' +
+      money(
+        Math.min(...availablePrices)
+      )
+    );
+  }
+
+  function productStatus(product) {
+    if (!product.visible) {
+      return {
+        label: 'Hidden',
+        className: 'badge-none',
+      };
+    }
+
+    if (!product.available) {
+      return {
+        label: 'Sold Out',
+        className: 'badge-danger',
+      };
+    }
+
+    if (
+      product.product_type ===
+      'configurable'
+    ) {
+      const availableVariant =
+        (product.variants || [])
+          .some(v => v.available);
+
+      if (!availableVariant) {
+        return {
+          label: 'Sold Out',
+          className: 'badge-danger',
+        };
+      }
+    }
+
+    return {
+      label: 'Available',
+      className: 'badge-success',
+    };
+  }
 
   function renderTab(tab) {
     const body = $('#menuBody');
+
     if (tab === 'prod') {
-      body.innerHTML = `
-        <div class="toolbar">
-          <input class="search" id="prodSearch" placeholder="🔍 Search products">
-          <select id="prodCat"><option value="">All categories</option>${cats.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}</select>
-          <button class="btn primary" onclick="app.openProductForm()">+ Add Product</button>
-        </div>
-        <div class="card"><div id="prodTable"></div></div>`;
-      const draw = () => {
-        const q = $('#prodSearch').value.toLowerCase();
-        const fc = $('#prodCat').value;
-        let rows = state.products.slice();
-        if (q) rows = rows.filter(p => p.name.toLowerCase().includes(q));
-        if (fc) rows = rows.filter(p => p.category_id === +fc);
-        $('#prodTable').innerHTML = `<table class="data">
-          <thead><tr><th></th><th>Product</th><th>Category</th><th class="text-right">Price</th><th class="text-right">Cost</th><th class="text-right">Margin</th><th>Available</th><th></th></tr></thead>
-          <tbody>${rows.map(p => {
-            const cat = cats.find(c => c.id === p.category_id);
-            const margin = p.price > 0 ? (((p.price - p.cost) / p.price) * 100).toFixed(0) : '0';
-            const visual = p.image_url
-              ? `<img src="${p.image_url}" style="width:40px;height:40px;border-radius:6px;object-fit:cover">`
-              : `<span style="font-size:24px">${p.image||'🍽'}</span>`;
-            return `<tr>
-              <td>${visual}</td>
-              <td><b>${p.name}</b></td>
-              <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
-              <td class="text-right">${money(p.price)}</td>
-              <td class="text-right text-muted">${money(p.cost)}</td>
-              <td class="text-right"><b>${margin}%</b></td>
-              <td><span class="badge ${p.available ? 'badge-success' : 'badge-danger'}">${p.available ? 'Available' : 'Off Menu'}</span></td>
-              <td><button class="btn sm" onclick="app.openProductForm(${p.id})">Edit</button></td>
-            </tr>`;
-          }).join('') || '<tr><td colspan="8" class="text-center text-muted">No products</td></tr>'}</tbody>
-        </table>`;
-      };
-      draw();
-      $('#prodSearch').addEventListener('input', draw);
-      $('#prodCat').addEventListener('change', draw);
-    } else {
-      body.innerHTML = `
-        <div class="toolbar">
-          <button class="btn primary" onclick="app.openCategoryForm()">+ Add Category</button>
-        </div>
-        <div class="card"><table class="data">
-          <thead><tr><th>Icon</th><th>Name</th><th class="text-right">Sort</th><th class="text-right">Products</th><th></th></tr></thead>
-          <tbody>${cats.map(c=>{
-            const cnt = state.products.filter(p => p.category_id === c.id).length;
-            return `<tr>
-              <td style="font-size:24px">${c.icon}</td>
-              <td><b>${c.name}</b></td>
-              <td class="text-right">${c.sort_order}</td>
-              <td class="text-right">${cnt}</td>
-              <td><button class="btn sm" onclick="app.openCategoryForm(${c.id})">Edit</button></td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>`;
+      renderProductsTab(body);
+      return;
     }
+
+    if (tab === 'cat') {
+      renderCategoriesTab(body);
+      return;
+    }
+
+    renderAddonsTab(body);
+  }
+
+  function renderProductsTab(body) {
+    body.innerHTML = `
+      <div class="toolbar">
+        <input
+          class="search"
+          id="prodSearch"
+          placeholder="🔍 Search products"
+        >
+
+        <select id="prodCat">
+          <option value="">
+            All categories
+          </option>
+
+          ${cats.map(c => `
+            <option value="${c.id}">
+              ${c.icon || '🍽️'} ${c.name}
+            </option>
+          `).join('')}
+        </select>
+
+        <select id="prodType">
+          <option value="">
+            All product types
+          </option>
+
+          <option value="simple">
+            Simple
+          </option>
+
+          <option value="configurable">
+            Configurable
+          </option>
+        </select>
+
+        <button
+          class="btn primary"
+          onclick="app.openProductForm()"
+        >
+          + Add Product
+        </button>
+      </div>
+
+      <div class="card">
+        <div id="prodTable"></div>
+      </div>
+    `;
+
+    const draw = () => {
+      const q =
+        $('#prodSearch')
+          .value
+          .trim()
+          .toLowerCase();
+
+      const category =
+        $('#prodCat').value;
+
+      const type =
+        $('#prodType').value;
+
+      let rows =
+        state.products.slice();
+
+      if (q) {
+        rows = rows.filter(p =>
+          p.name
+            .toLowerCase()
+            .includes(q)
+        );
+      }
+
+      if (category) {
+        rows = rows.filter(
+          p =>
+            p.category_id ===
+            Number(category)
+        );
+      }
+
+      if (type) {
+        rows = rows.filter(
+          p => p.product_type === type
+        );
+      }
+
+      $('#prodTable').innerHTML = `
+        <table class="data">
+          <thead>
+            <tr>
+              <th></th>
+
+              <th>
+                Product
+              </th>
+
+              <th>
+                Category
+              </th>
+
+              <th>
+                Type
+              </th>
+
+              <th>
+                Options / Variants
+              </th>
+
+              <th class="text-right">
+                Selling Price
+              </th>
+
+              <th>
+                Customer Menu
+              </th>
+
+              <th></th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              rows.map(p => {
+                const cat =
+                  cats.find(
+                    c =>
+                      c.id ===
+                      p.category_id
+                  );
+
+                const status =
+                  productStatus(p);
+
+                const variantCount =
+                  (p.variants || [])
+                    .length;
+
+                const optionCount =
+                  (p.option_groups || [])
+                    .length;
+
+                const visual =
+                  p.image_url
+                    ? `
+                      <img
+                        src="${p.image_url}"
+                        style="
+                          width:44px;
+                          height:44px;
+                          border-radius:8px;
+                          object-fit:cover;
+                        "
+                      >
+                    `
+                    : `
+                      <span
+                        style="font-size:26px"
+                      >
+                        ${p.image || '🍽️'}
+                      </span>
+                    `;
+
+                return `
+                  <tr>
+                    <td>
+                      ${visual}
+                    </td>
+
+                    <td>
+                      <b>
+                        ${p.name}
+                      </b>
+
+                      ${
+                        (p.addons || [])
+                          .length
+                          ? `
+                            <div
+                              class="text-muted"
+                              style="
+                                font-size:11px;
+                                margin-top:3px;
+                              "
+                            >
+                              ⚡ ${
+                                p.addons.length
+                              } add-on${
+                                p.addons.length === 1
+                                  ? ''
+                                  : 's'
+                              }
+                            </div>
+                          `
+                          : ''
+                      }
+                    </td>
+
+                    <td>
+                      ${
+                        cat
+                          ? `
+                            ${cat.icon || '🍽️'}
+                            ${cat.name}
+                          `
+                          : '—'
+                      }
+                    </td>
+
+                    <td>
+                      ${
+                        p.product_type ===
+                        'configurable'
+                          ? `
+                            <span
+                              class="
+                                badge
+                                badge-info
+                              "
+                            >
+                              Configurable
+                            </span>
+                          `
+                          : `
+                            <span
+                              class="
+                                badge
+                                badge-silver
+                              "
+                            >
+                              Simple
+                            </span>
+                          `
+                      }
+                    </td>
+
+                    <td>
+                      ${
+                        p.product_type ===
+                        'configurable'
+                          ? `
+                            <b>
+                              ${variantCount}
+                              variant${
+                                variantCount === 1
+                                  ? ''
+                                  : 's'
+                              }
+                            </b>
+
+                            <div
+                              class="text-muted"
+                              style="
+                                font-size:11px;
+                                margin-top:3px;
+                              "
+                            >
+                              ${optionCount}
+                              option group${
+                                optionCount === 1
+                                  ? ''
+                                  : 's'
+                              }
+                            </div>
+                          `
+                          : `
+                            <span
+                              class="text-muted"
+                            >
+                              —
+                            </span>
+                          `
+                      }
+                    </td>
+
+                    <td class="text-right">
+                      <b>
+                        ${productPriceLabel(p)}
+                      </b>
+                    </td>
+
+                    <td>
+                      <span
+                        class="
+                          badge
+                          ${status.className}
+                        "
+                      >
+                        ${status.label}
+                      </span>
+
+                      ${
+                        !p.visible
+                          ? `
+                            <div
+                              class="text-muted"
+                              style="
+                                font-size:10px;
+                                margin-top:3px;
+                              "
+                            >
+                              Not shown to customers
+                            </div>
+                          `
+                          : ''
+                      }
+                    </td>
+
+                    <td>
+                      <button
+                        class="btn sm"
+                        onclick="
+                          app.openProductForm(
+                            ${p.id}
+                          )
+                        "
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')
+              ||
+              `
+                <tr>
+                  <td
+                    colspan="8"
+                    class="
+                      text-center
+                      text-muted
+                    "
+                  >
+                    No products found
+                  </td>
+                </tr>
+              `
+            }
+          </tbody>
+        </table>
+      `;
+    };
+
+    $('#prodSearch')
+      .addEventListener(
+        'input',
+        draw
+      );
+
+    $('#prodCat')
+      .addEventListener(
+        'change',
+        draw
+      );
+
+    $('#prodType')
+      .addEventListener(
+        'change',
+        draw
+      );
+
+    draw();
+  }
+
+  function renderCategoriesTab(body) {
+    body.innerHTML = `
+      <div class="toolbar">
+        <button
+          class="btn primary"
+          onclick="app.openCategoryForm()"
+        >
+          + Add Category
+        </button>
+      </div>
+
+      <div class="card">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>
+                Icon
+              </th>
+
+              <th>
+                Name
+              </th>
+
+              <th class="text-right">
+                Sort
+              </th>
+
+              <th class="text-right">
+                Products
+              </th>
+
+              <th></th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${cats.map(c => {
+              const count =
+                state.products.filter(
+                  p =>
+                    p.category_id === c.id
+                ).length;
+
+              return `
+                <tr>
+                  <td
+                    style="font-size:24px"
+                  >
+                    ${c.icon || '🍽️'}
+                  </td>
+
+                  <td>
+                    <b>
+                      ${c.name}
+                    </b>
+                  </td>
+
+                  <td class="text-right">
+                    ${c.sort_order}
+                  </td>
+
+                  <td class="text-right">
+                    ${count}
+                  </td>
+
+                  <td>
+                    <button
+                      class="btn sm"
+                      onclick="
+                        app.openCategoryForm(
+                          ${c.id}
+                        )
+                      "
+                    >
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderAddonsTab(body) {
+    body.innerHTML = `
+      <div class="toolbar">
+        <div
+          style="flex:1"
+        >
+          <b>
+            ⚡ Boost It Up!
+          </b>
+
+          <div
+            class="text-muted"
+            style="
+              font-size:12px;
+              margin-top:3px;
+            "
+          >
+            Reusable extras that can be
+            assigned to menu products.
+          </div>
+        </div>
+
+        <button
+          class="btn primary"
+          onclick="app.openAddonForm()"
+        >
+          + Add Add-on
+        </button>
+      </div>
+
+      <div class="card">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>
+                Add-on
+              </th>
+
+              <th class="text-right">
+                Price
+              </th>
+
+              <th>
+                Availability
+              </th>
+
+              <th class="text-right">
+                Sort
+              </th>
+
+              <th></th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              state.addons.map(a => `
+                <tr>
+                  <td>
+                    <b>
+                      ${a.name}
+                    </b>
+                  </td>
+
+                  <td class="text-right">
+                    <b>
+                      + ${money(a.price)}
+                    </b>
+                  </td>
+
+                  <td>
+                    <span
+                      class="
+                        badge
+                        ${
+                          a.available
+                            ? 'badge-success'
+                            : 'badge-danger'
+                        }
+                      "
+                    >
+                      ${
+                        a.available
+                          ? 'Available'
+                          : 'Sold Out'
+                      }
+                    </span>
+                  </td>
+
+                  <td class="text-right">
+                    ${a.sort_order}
+                  </td>
+
+                  <td>
+                    <button
+                      class="btn sm"
+                      onclick="
+                        app.openAddonForm(
+                          ${a.id}
+                        )
+                      "
+                    >
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              `).join('')
+              ||
+              `
+                <tr>
+                  <td
+                    colspan="5"
+                    class="
+                      text-center
+                      text-muted
+                    "
+                  >
+                    No add-ons created yet.
+                  </td>
+                </tr>
+              `
+            }
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 };
 
-async function openProductForm(id) {
-  const isNew = !id;
-  const cats = state.categories;
-  const p = isNew
-    ? { name:'', category_id: cats[0]?.id, price: 0, cost: 0, size:'', image:'🍽', image_url: null, available: true }
-    : state.products.find(x => x.id === id);
+async function openAddonForm(id) {
+  const editing = Boolean(id);
+
+  const addon = editing
+    ? state.addons.find(
+        a => a.id === id
+      )
+    : {
+        name: '',
+        price: 0,
+        available: true,
+        sort_order:
+          state.addons.length + 1,
+      };
+
+  if (!addon) {
+    toast(
+      'Add-on not found.',
+      'error'
+    );
+
+    return;
+  }
+
   openModal(`
-    <div class="modal-head"><h3>${isNew?'New Product':'Edit Product'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-    <div class="modal-body">
-      <div class="form-row">
-        <div class="field"><label>Name</label><input id="pName" value="${p.name}"></div>
-        <div class="field"><label>Category</label><select id="pCat">${cats.map(c=>`<option value="${c.id}" ${c.id===p.category_id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}</select></div>
-      </div>
-      <div class="form-row three">
-        <div class="field"><label>Price (RM)</label><input id="pPrice" type="number" step="0.01" value="${p.price}"></div>
-        <div class="field"><label>Cost (RM)</label><input id="pCost" type="number" step="0.01" value="${p.cost}"></div>
-        <div class="field"><label>Size</label><input id="pSize" value="${p.size||''}" placeholder="S / M / Iced / -"></div>
-      </div>
-      <div class="form-row">
-        <div class="field"><label>Emoji (fallback when no photo)</label><input id="pImg" maxlength="2" value="${p.image||'🍽'}"></div>
-        <div class="field"><label>&nbsp;</label><label><input type="checkbox" id="pAvail" ${p.available?'checked':''}> Available on menu</label></div>
+    <div class="modal-head">
+      <div>
+        <h3>
+          ${
+            editing
+              ? 'Edit Add-on'
+              : 'New Add-on'
+          }
+        </h3>
+
+        <small class="text-muted">
+          Boost It Up! menu option
+        </small>
       </div>
 
-      ${!isNew ? `
-      <div class="section-title mt-3">Product Photo</div>
-      <div style="display:flex;align-items:center;gap:14px;padding:10px;background:#f9fafb;border-radius:10px">
-        <div id="pImgPreview" style="width:80px;height:80px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:38px;border:1.5px dashed #d1d5db;overflow:hidden">
-          ${p.image_url
-            ? `<img src="${p.image_url}" style="width:100%;height:100%;object-fit:cover">`
-            : (p.image || '🍽')}
-        </div>
-        <div style="flex:1">
-          <input type="file" id="pImgFile" accept="image/png,image/jpeg,image/webp,image/gif" style="font-size:13px">
-          <div class="text-muted" style="font-size:11px;margin-top:4px">PNG / JPG / WebP, up to 4 MB. Square images look best.</div>
-        </div>
-        ${p.image_url ? `<button class="btn sm danger" id="pImgRemove">Remove</button>` : ''}
-      </div>
-      ` : '<div class="alert alert-info mt-3" style="font-size:12px">💡 Save the product first, then re-open it to upload a photo.</div>'}
+      <button
+        class="close-btn"
+        onclick="closeModal()"
+      >
+        ×
+      </button>
     </div>
-    <div class="modal-foot">
-      ${!isNew?`<button class="btn danger" onclick="app.deleteProduct(${id})">🗑 Delete</button>`:''}
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn primary" id="saveProd">${isNew?'Create':'Save'}</button>
-    </div>`, {size:'lg'});
 
-  // --- Image upload handlers (only for existing products) ---
-  if (!isNew) {
-    const fileInput = $('#pImgFile');
-    if (fileInput) {
-      fileInput.addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        if (file.size > 4 * 1024 * 1024) {
-          toast('File too large (max 4 MB)', 'error');
-          fileInput.value = '';
+    <div class="modal-body">
+
+      <div class="field">
+        <label>
+          Add-on Name
+        </label>
+
+        <input
+          id="addonName"
+          value="${addon.name || ''}"
+          placeholder="e.g. Extra Shot"
+        >
+      </div>
+
+      <div class="form-row">
+
+        <div class="field">
+          <label>
+            Additional Price (RM)
+          </label>
+
+          <input
+            id="addonPrice"
+            type="number"
+            min="0"
+            step="0.01"
+            value="${num(addon.price)}"
+          >
+        </div>
+
+        <div class="field">
+          <label>
+            Sort Order
+          </label>
+
+          <input
+            id="addonSort"
+            type="number"
+            min="0"
+            step="1"
+            value="${addon.sort_order || 0}"
+          >
+        </div>
+
+      </div>
+
+      <div class="field">
+        <label
+          style="
+            display:flex;
+            align-items:center;
+            gap:8px;
+          "
+        >
+          <input
+            id="addonAvailable"
+            type="checkbox"
+            style="width:auto"
+            ${
+              addon.available
+                ? 'checked'
+                : ''
+            }
+          >
+
+          Available for ordering
+        </label>
+
+        <small class="text-muted">
+          Turn this off when the add-on
+          is temporarily sold out.
+        </small>
+      </div>
+
+    </div>
+
+    <div class="modal-foot">
+
+      ${
+        editing
+          ? `
+            <button
+              class="btn danger"
+              onclick="
+                app.deleteAddon(
+                  ${addon.id}
+                )
+              "
+              style="margin-right:auto"
+            >
+              Delete
+            </button>
+          `
+          : ''
+      }
+
+      <button
+        class="btn"
+        onclick="closeModal()"
+      >
+        Cancel
+      </button>
+
+      <button
+        class="btn primary"
+        id="saveAddon"
+      >
+        ${
+          editing
+            ? 'Save Changes'
+            : 'Create Add-on'
+        }
+      </button>
+    </div>
+  `);
+
+  $('#saveAddon')
+    .addEventListener(
+      'click',
+      async () => {
+        const name =
+          $('#addonName')
+            .value
+            .trim();
+
+        if (!name) {
+          toast(
+            'Add-on name is required.',
+            'error'
+          );
+
           return;
         }
+
+        const payload = {
+          name,
+
+          price:
+            Number(
+              $('#addonPrice').value
+            ),
+
+          available:
+            $('#addonAvailable')
+              .checked,
+
+          sort_order:
+            Number(
+              $('#addonSort').value
+            ),
+        };
+
         try {
-          await API.upload(`/products/${id}/image`, file, 'image');
-          toast('Photo uploaded'); closeModal(); route('menu');
+          if (editing) {
+            await API.put(
+              '/addons/' + addon.id,
+              payload
+            );
+
+            toast(
+              'Add-on updated.'
+            );
+          } else {
+            await API.post(
+              '/addons',
+              payload
+            );
+
+            toast(
+              'Add-on created.'
+            );
+          }
+
+          closeModal();
+
+          route('menu');
+
         } catch (err) {
-          toast(err.payload?.message || 'Upload failed', 'error');
+          const errors =
+            err.payload?.errors;
+
+          const message =
+            errors
+              ? Object.values(errors)
+                  .flat()[0]
+              : (
+                  err.payload?.message ||
+                  'Save failed'
+                );
+
+          toast(
+            message,
+            'error'
+          );
         }
-      });
+      }
+    );
+}
+
+async function deleteAddon(id) {
+  if (
+    !confirm(
+      'Delete this add-on?'
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await API.delete(
+      '/addons/' + id
+    );
+
+    toast(
+      'Add-on deleted.'
+    );
+
+    closeModal();
+
+    route('menu');
+
+  } catch (err) {
+    toast(
+      err.payload?.message ||
+      'Delete failed',
+      'error'
+    );
+  }
+}
+
+async function openProductForm(id) {
+  const isNew = !id;
+
+  const cats = state.categories || [];
+
+  let product = isNew
+    ? {
+        name: '',
+        category_id: cats[0]?.id || null,
+        price: 0,
+        cost: 0,
+        image: '🍽️',
+        image_url: null,
+        available: true,
+        visible: true,
+        product_type: 'simple',
+        addons: [],
+        option_groups: [],
+        variants: [],
+      }
+    : await API.get(
+        '/products/' + id
+      );
+
+  product.price =
+    num(product.price);
+
+  product.cost =
+    num(product.cost);
+
+  product.addons =
+    product.addons || [];
+
+  product.option_groups =
+    product.option_groups || [];
+
+  product.variants =
+    product.variants || [];
+
+  const selectedAddonIds =
+    new Set(
+      product.addons.map(
+        addon => Number(addon.id)
+      )
+    );
+
+  function draw() {
+    const configurable =
+      $('#productType')
+        ?.value === 'configurable';
+
+    const simplePriceSection =
+      $('#simplePriceSection');
+
+    const configurableNote =
+      $('#configurablePriceNote');
+
+    if (simplePriceSection) {
+      simplePriceSection.style.display =
+        configurable
+          ? 'none'
+          : '';
     }
-    const removeBtn = $('#pImgRemove');
-    if (removeBtn) {
-      removeBtn.addEventListener('click', async () => {
-        if (!confirm('Remove this photo? The product will fall back to its emoji icon.')) return;
-        try {
-          await API.delete(`/products/${id}/image`);
-          toast('Photo removed'); closeModal(); route('menu');
-        } catch (err) {
-          toast(err.payload?.message || 'Remove failed', 'error');
-        }
-      });
+
+    if (configurableNote) {
+      configurableNote.style.display =
+        configurable
+          ? ''
+          : 'none';
     }
   }
 
-  $('#saveProd').addEventListener('click', async () => {
-    const name = $('#pName').value.trim();
-    if (!name) { toast('Name is required', 'error'); return; }
-    const body = {
-      name,
-      category_id: +$('#pCat').value,
-      price: +$('#pPrice').value,
-      cost: +$('#pCost').value,
-      size: $('#pSize').value || null,
-      image: $('#pImg').value || '🍽',
-      available: $('#pAvail').checked,
-    };
-    try {
-      if (isNew) await API.post('/products', body);
-      else       await API.put('/products/' + id, body);
-      toast('Saved');
-      closeModal();
-      route('menu');
-    } catch (err) {
-      toast(err.payload?.message || 'Save failed', 'error');
-    }
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h3>
+          ${
+            isNew
+              ? 'New Product'
+              : 'Edit Product'
+          }
+        </h3>
+
+        <small class="text-muted">
+          Menu V2 product configuration
+        </small>
+      </div>
+
+      <button
+        class="close-btn"
+        onclick="closeModal()"
+      >
+        ×
+      </button>
+    </div>
+
+    <div class="modal-body">
+
+      <div class="form-section">
+
+        <div class="form-section-title">
+          Product Information
+        </div>
+
+        <div class="form-row">
+
+          <div class="field">
+            <label>
+              Product Name *
+            </label>
+
+            <input
+              id="productName"
+              value="${product.name || ''}"
+              placeholder="e.g. Latte"
+            >
+          </div>
+
+          <div class="field">
+            <label>
+              Category *
+            </label>
+
+            <select id="productCategory">
+              ${cats.map(cat => `
+                <option
+                  value="${cat.id}"
+                  ${
+                    Number(cat.id) ===
+                    Number(product.category_id)
+                      ? 'selected'
+                      : ''
+                  }
+                >
+                  ${cat.icon || '🍽️'}
+                  ${cat.name}
+                </option>
+              `).join('')}
+            </select>
+          </div>
+
+        </div>
+
+        <div class="form-row">
+
+          <div class="field">
+            <label>
+              Product Type
+            </label>
+
+            <select id="productType">
+
+              <option
+                value="simple"
+                ${
+                  product.product_type ===
+                  'simple'
+                    ? 'selected'
+                    : ''
+                }
+              >
+                Simple Product
+              </option>
+
+              <option
+                value="configurable"
+                ${
+                  product.product_type ===
+                  'configurable'
+                    ? 'selected'
+                    : ''
+                }
+              >
+                Configurable Product
+              </option>
+
+            </select>
+
+            <small class="text-muted">
+              Simple = one price.
+              Configurable = options and variants.
+            </small>
+          </div>
+
+          <div class="field">
+            <label>
+              Icon
+            </label>
+
+            <input
+              id="productIcon"
+              maxlength="8"
+              value="${product.image || ''}"
+              placeholder="☕"
+            >
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <div class="form-section">
+
+        <div class="form-section-title">
+          Pricing
+        </div>
+
+        <div id="simplePriceSection">
+
+          <div class="form-row">
+
+            <div class="field">
+              <label>
+                Selling Price (RM)
+              </label>
+
+              <input
+                id="productPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                value="${product.price}"
+              >
+            </div>
+
+            <div class="field">
+              <label>
+                Cost (RM)
+              </label>
+
+              <input
+                id="productCost"
+                type="number"
+                min="0"
+                step="0.01"
+                value="${product.cost}"
+              >
+            </div>
+
+          </div>
+
+        </div>
+
+        <div
+          id="configurablePriceNote"
+          class="alert alert-info"
+          style="display:none"
+        >
+          <b>Configurable product</b><br>
+
+          Selling price will come from
+          the product variants.
+
+          Example:
+
+          <br><br>
+
+          Small RM4.50<br>
+          Medium RM5.50<br>
+          Iced RM6.00
+        </div>
+
+      </div>
+
+
+      <div class="form-section">
+
+        <div class="form-section-title">
+          Customer Menu Status
+        </div>
+
+        <div class="check-grid">
+
+          <label class="check-card">
+
+            <input
+              id="productVisible"
+              type="checkbox"
+              ${
+                product.visible
+                  ? 'checked'
+                  : ''
+              }
+            >
+
+            <span>
+              <b>
+                Visible
+              </b>
+
+              <small>
+                Show this product on
+                the customer menu.
+              </small>
+            </span>
+
+          </label>
+
+
+          <label class="check-card">
+
+            <input
+              id="productAvailable"
+              type="checkbox"
+              ${
+                product.available
+                  ? 'checked'
+                  : ''
+              }
+            >
+
+            <span>
+              <b>
+                Available
+              </b>
+
+              <small>
+                Customers may order it.
+                Turn off for Sold Out.
+              </small>
+            </span>
+
+          </label>
+
+        </div>
+
+      </div>
+
+
+      <div class="form-section">
+
+        <div class="form-section-title">
+          ⚡ Boost It Up!
+        </div>
+
+        <div class="text-muted"
+          style="
+            font-size:12px;
+            margin-bottom:10px;
+          "
+        >
+          Select which add-ons may be
+          used with this product.
+        </div>
+
+        ${
+          (state.addons || []).length
+            ? `
+              <div class="check-grid">
+
+                ${state.addons.map(addon => `
+                  <label class="check-card">
+
+                    <input
+                      type="checkbox"
+                      class="productAddonCheck"
+                      value="${addon.id}"
+                      ${
+                        selectedAddonIds.has(
+                          Number(addon.id)
+                        )
+                          ? 'checked'
+                          : ''
+                      }
+                    >
+
+                    <span>
+
+                      <b>
+                        ${addon.name}
+                      </b>
+
+                      <small>
+                        + ${money(addon.price)}
+                      </small>
+
+                    </span>
+
+                  </label>
+                `).join('')}
+
+              </div>
+            `
+            : `
+              <div
+                class="text-muted"
+              >
+                No add-ons created yet.
+              </div>
+            `
+        }
+
+      </div>
+
+
+      ${
+        !isNew &&
+        product.product_type ===
+          'configurable'
+          ? `
+            <div class="form-section">
+
+              <div class="form-section-title">
+                Current Configuration
+              </div>
+
+              <div
+                style="
+                  display:grid;
+                  grid-template-columns:
+                    repeat(
+                      auto-fit,
+                      minmax(150px,1fr)
+                    );
+                  gap:10px;
+                "
+              >
+
+                <div class="stat-pill">
+                  <div>
+                    <div class="l">
+                      Option Groups
+                    </div>
+
+                    <div class="v">
+                      ${
+                        product
+                          .option_groups
+                          .length
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                <div class="stat-pill">
+                  <div>
+                    <div class="l">
+                      Variants
+                    </div>
+
+                    <div class="v">
+                      ${
+                        product
+                          .variants
+                          .length
+                      }
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <div
+                class="text-muted"
+                style="
+                  font-size:12px;
+                  margin-top:10px;
+                "
+              >
+                Option groups and exact variant
+                pricing are managed separately.
+
+                <div style="margin-top:12px">
+                  <button
+                    type="button"
+                    class="btn primary"
+                    id="configureProductBtn"
+                  >
+                    ⚙ Configure Options & Variants
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          `
+          : ''
+      }
+
+    </div>
+
+
+    <div class="modal-foot">
+
+      ${
+        !isNew
+          ? `
+            <button
+              class="btn danger"
+              onclick="
+                app.deleteProduct(
+                  ${product.id}
+                )
+              "
+              style="margin-right:auto"
+            >
+              Delete
+            </button>
+          `
+          : ''
+      }
+
+      <button
+        class="btn"
+        onclick="closeModal()"
+      >
+        Cancel
+      </button>
+
+      <button
+        class="btn primary"
+        id="saveProduct"
+      >
+        ${
+          isNew
+            ? 'Create Product'
+            : 'Save Changes'
+        }
+      </button>
+
+    </div>
+  `, {
+    size: 'lg',
   });
+
+
+  $('#productType')
+    ?.addEventListener(
+      'change',
+      draw
+    );
+
+  draw();
+
+  $('#configureProductBtn')
+    ?.addEventListener(
+      'click',
+      () => {
+        openProductConfigurator(
+          product.id
+        );
+      }
+    );
+
+  $('#saveProduct')
+    .addEventListener(
+      'click',
+      async () => {
+
+        const name =
+          $('#productName')
+            .value
+            .trim();
+
+        if (!name) {
+          toast(
+            'Product name is required.',
+            'error'
+          );
+
+          return;
+        }
+
+        const productType =
+          $('#productType').value;
+
+        const payload = {
+          name,
+
+          category_id:
+            Number(
+              $('#productCategory').value
+            ),
+
+          image:
+            $('#productIcon')
+              .value
+              .trim() || null,
+
+          product_type:
+            productType,
+
+          visible:
+            $('#productVisible')
+              .checked,
+
+          available:
+            $('#productAvailable')
+              .checked,
+
+          /*
+           * Configurable products use
+           * variant pricing.
+           */
+          price:
+            productType ===
+            'configurable'
+              ? 0
+              : Number(
+                  $('#productPrice')
+                    .value || 0
+                ),
+
+          cost:
+            Number(
+              $('#productCost')
+                ?.value ||
+              product.cost ||
+              0
+            ),
+        };
+
+
+        const addonIds =
+          $$('.productAddonCheck:checked')
+            .map(
+              input =>
+                Number(input.value)
+            );
+
+
+        const button =
+          $('#saveProduct');
+
+        button.disabled = true;
+
+        button.textContent =
+          'Saving...';
+
+
+        try {
+          let savedProduct;
+
+          if (isNew) {
+            savedProduct =
+              await API.post(
+                '/products',
+                payload
+              );
+          } else {
+            savedProduct =
+              await API.put(
+                '/products/' +
+                product.id,
+                payload
+              );
+          }
+
+
+          /*
+           * Sync eligible add-ons
+           * after the product exists.
+           */
+          await API.put(
+            '/products/' +
+              savedProduct.id +
+              '/addons',
+            {
+              addon_ids:
+                addonIds,
+            }
+          );
+
+
+          toast(
+            isNew
+              ? 'Product created.'
+              : 'Product updated.'
+          );
+
+          closeModal();
+
+          route('menu');
+
+        } catch (err) {
+
+          const errors =
+            err.payload?.errors;
+
+          const message =
+            errors
+              ? Object.values(
+                  errors
+                )
+                  .flat()[0]
+              : (
+                  err.payload
+                    ?.message ||
+                  'Save failed'
+                );
+
+          toast(
+            message,
+            'error'
+          );
+
+          button.disabled = false;
+
+          button.textContent =
+            isNew
+              ? 'Create Product'
+              : 'Save Changes';
+        }
+      }
+    );
+}
+
+async function openProductConfigurator(
+  productId
+) {
+  const product =
+    await API.get(
+      '/products/' + productId
+    );
+
+  const groups =
+    product.option_groups || [];
+
+  const variants =
+    product.variants || [];
+
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h3>
+          ⚙ ${product.name}
+        </h3>
+
+        <small class="text-muted">
+          Options & Variant Pricing
+        </small>
+      </div>
+
+      <button
+        class="close-btn"
+        onclick="closeModal()"
+      >
+        ×
+      </button>
+    </div>
+
+    <div class="modal-body">
+
+      <div class="form-section">
+
+        <div
+          style="
+            display:flex;
+            justify-content:
+              space-between;
+            align-items:center;
+            gap:12px;
+            margin-bottom:14px;
+          "
+        >
+          <div>
+            <div
+              class="form-section-title"
+              style="margin-bottom:3px"
+            >
+              Option Groups
+            </div>
+
+            <small class="text-muted">
+              Example: Size,
+              Temperature or Choice
+            </small>
+          </div>
+
+          <button
+            class="btn primary sm"
+            onclick="
+              app.openOptionGroupForm(
+                ${product.id}
+              )
+            "
+          >
+            + Add Option Group
+          </button>
+        </div>
+
+        ${
+          groups.length
+            ? groups.map(group => `
+                <div
+                  class="card"
+                  style="
+                    margin-bottom:12px;
+                    box-shadow:none;
+                    border:1px solid
+                      var(--border);
+                  "
+                >
+
+                  <div
+                    style="
+                      display:flex;
+                      justify-content:
+                        space-between;
+                      align-items:center;
+                      gap:10px;
+                    "
+                  >
+
+                    <div>
+                      <b>
+                        ${group.name}
+                      </b>
+
+                      <div
+                        class="text-muted"
+                        style="
+                          font-size:11px;
+                          margin-top:3px;
+                        "
+                      >
+                        ${
+                          group.required
+                            ? 'Required'
+                            : 'Optional'
+                        }
+
+                        ·
+
+                        ${
+                          group.multiple
+                            ? 'Multiple selection'
+                            : 'Single selection'
+                        }
+                      </div>
+                    </div>
+
+                    <div
+                      style="
+                        display:flex;
+                        gap:6px;
+                      "
+                    >
+                      <button
+                        class="btn sm"
+                        onclick="
+                          app.openOptionGroupForm(
+                            ${product.id},
+                            ${group.id}
+                          )
+                        "
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        class="btn sm danger"
+                        onclick="
+                          app.deleteOptionGroup(
+                            ${product.id},
+                            ${group.id}
+                          )
+                        "
+                      >
+                        Delete
+                      </button>
+                    </div>
+
+                  </div>
+
+                  <div
+                    style="
+                      display:flex;
+                      flex-wrap:wrap;
+                      gap:7px;
+                      margin-top:12px;
+                    "
+                  >
+
+                    ${
+                      (group.values || [])
+                        .map(value => `
+                          <button
+                            type="button"
+                            class="btn sm"
+                            onclick="
+                              app.openOptionValueForm(
+                                ${product.id},
+                                ${group.id},
+                                ${value.id}
+                              )
+                            "
+                            style="
+                              ${
+                                value.available
+                                  ? ''
+                                  : 'opacity:.55;'
+                              }
+                            "
+                          >
+                            ${value.name}
+
+                            ${
+                              value.available
+                                ? ''
+                                : ' · Sold Out'
+                            }
+                          </button>
+                        `)
+                        .join('')
+                    }
+
+                    <button
+                      type="button"
+                      class="btn sm primary"
+                      onclick="
+                        app.openOptionValueForm(
+                          ${product.id},
+                          ${group.id}
+                        )
+                      "
+                    >
+                      + Value
+                    </button>
+
+                  </div>
+
+                </div>
+              `).join('')
+            : `
+              <div
+                class="empty"
+                style="padding:24px"
+              >
+                No option groups yet.
+              </div>
+            `
+        }
+
+      </div>
+
+
+      <div class="form-section">
+
+        <div
+          style="
+            display:flex;
+            justify-content:
+              space-between;
+            align-items:center;
+            gap:12px;
+            margin-bottom:14px;
+          "
+        >
+
+          <div>
+            <div
+              class="form-section-title"
+              style="margin-bottom:3px"
+            >
+              Variants
+            </div>
+
+            <small class="text-muted">
+              Each valid combination has
+              its own exact selling price.
+            </small>
+          </div>
+
+          <button
+            class="btn primary sm"
+            onclick="
+              app.openVariantForm(
+                ${product.id}
+              )
+            "
+            ${
+              groups.length
+                ? ''
+                : 'disabled'
+            }
+          >
+            + Add Variant
+          </button>
+
+        </div>
+
+        ${
+          variants.length
+            ? `
+              <table class="data">
+
+                <thead>
+                  <tr>
+                    <th>
+                      Variant
+                    </th>
+
+                    <th>
+                      Options
+                    </th>
+
+                    <th
+                      class="text-right"
+                    >
+                      Price
+                    </th>
+
+                    <th>
+                      Status
+                    </th>
+
+                    <th></th>
+                  </tr>
+                </thead>
+
+                <tbody>
+
+                  ${variants.map(variant => {
+
+                    const values =
+                      (
+                        variant
+                          .option_values ||
+                        []
+                      )
+                        .map(v => v.name)
+                        .join(' · ');
+
+                    return `
+                      <tr>
+
+                        <td>
+                          <b>
+                            ${variant.name}
+                          </b>
+                        </td>
+
+                        <td>
+                          ${
+                            values ||
+                            '—'
+                          }
+                        </td>
+
+                        <td
+                          class="text-right"
+                        >
+                          <b>
+                            ${money(
+                              variant.price
+                            )}
+                          </b>
+                        </td>
+
+                        <td>
+                          <span
+                            class="
+                              badge
+                              ${
+                                variant
+                                  .available
+                                  ? 'badge-success'
+                                  : 'badge-danger'
+                              }
+                            "
+                          >
+                            ${
+                              variant
+                                .available
+                                ? 'Available'
+                                : 'Sold Out'
+                            }
+                          </span>
+                        </td>
+
+                        <td>
+                          <button
+                            class="btn sm"
+                            onclick="
+                              app.openVariantForm(
+                                ${product.id},
+                                ${variant.id}
+                              )
+                            "
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            class="btn sm danger"
+                            onclick="
+                              app.deleteVariant(
+                                ${product.id},
+                                ${variant.id}
+                              )
+                            "
+                          >
+                            Delete
+                          </button>
+                        </td>
+
+                      </tr>
+                    `;
+                  }).join('')}
+
+                </tbody>
+
+              </table>
+            `
+            : `
+              <div
+                class="empty"
+                style="padding:24px"
+              >
+                No variants created yet.
+              </div>
+            `
+        }
+
+      </div>
+
+    </div>
+
+    <div class="modal-foot">
+
+      <button
+        class="btn"
+        onclick="
+          closeModal();
+          app.route('menu');
+        "
+      >
+        Done
+      </button>
+
+    </div>
+  `, {
+    size: 'lg',
+  });
+}
+
+async function openOptionGroupForm(
+  productId,
+  groupId = null
+) {
+  const product =
+    await API.get(
+      '/products/' + productId
+    );
+
+  const editing =
+    Boolean(groupId);
+
+  const group =
+    editing
+      ? (
+          product.option_groups || []
+        ).find(
+          g => g.id === groupId
+        )
+      : {
+          name: '',
+          required: true,
+          multiple: false,
+          sort_order:
+            (
+              product
+                .option_groups || []
+            ).length + 1,
+        };
+
+  if (!group) {
+    toast(
+      'Option group not found.',
+      'error'
+    );
+
+    return;
+  }
+
+  openModal(`
+    <div class="modal-head">
+
+      <h3>
+        ${
+          editing
+            ? 'Edit Option Group'
+            : 'New Option Group'
+        }
+      </h3>
+
+      <button
+        class="close-btn"
+        onclick="closeModal()"
+      >
+        ×
+      </button>
+
+    </div>
+
+    <div class="modal-body">
+
+      <div class="field">
+        <label>
+          Group Name
+        </label>
+
+        <input
+          id="optionGroupName"
+          value="${group.name || ''}"
+          placeholder="e.g. Size"
+        >
+      </div>
+
+      <div class="field">
+
+        <label>
+          Sort Order
+        </label>
+
+        <input
+          id="optionGroupSort"
+          type="number"
+          min="0"
+          step="1"
+          value="${group.sort_order || 0}"
+        >
+
+      </div>
+
+      <div class="check-grid">
+
+        <label class="check-card">
+
+          <input
+            id="optionGroupRequired"
+            type="checkbox"
+            ${
+              group.required
+                ? 'checked'
+                : ''
+            }
+          >
+
+          <span>
+            <b>
+              Required
+            </b>
+
+            <small>
+              Customer must select
+              a value.
+            </small>
+          </span>
+
+        </label>
+
+
+        <label class="check-card">
+
+          <input
+            id="optionGroupMultiple"
+            type="checkbox"
+            ${
+              group.multiple
+                ? 'checked'
+                : ''
+            }
+          >
+
+          <span>
+            <b>
+              Multiple
+            </b>
+
+            <small>
+              Allow multiple values
+              from this group.
+            </small>
+          </span>
+
+        </label>
+
+      </div>
+
+    </div>
+
+    <div class="modal-foot">
+
+      <button
+        class="btn"
+        onclick="
+          app.openProductConfigurator(
+            ${productId}
+          )
+        "
+      >
+        Cancel
+      </button>
+
+      <button
+        class="btn primary"
+        id="saveOptionGroup"
+      >
+        Save
+      </button>
+
+    </div>
+  `);
+
+  $('#saveOptionGroup')
+    .addEventListener(
+      'click',
+      async () => {
+
+        const name =
+          $('#optionGroupName')
+            .value
+            .trim();
+
+        if (!name) {
+          toast(
+            'Group name is required.',
+            'error'
+          );
+
+          return;
+        }
+
+        const payload = {
+          name,
+
+          required:
+            $('#optionGroupRequired')
+              .checked,
+
+          multiple:
+            $('#optionGroupMultiple')
+              .checked,
+
+          sort_order:
+            Number(
+              $('#optionGroupSort')
+                .value || 0
+            ),
+        };
+
+        try {
+
+          if (editing) {
+            await API.put(
+              '/product-option-groups/' +
+                group.id,
+              payload
+            );
+          } else {
+            await API.post(
+              '/products/' +
+                productId +
+                '/option-groups',
+              payload
+            );
+          }
+
+          toast(
+            'Option group saved.'
+          );
+
+          openProductConfigurator(
+            productId
+          );
+
+        } catch (err) {
+          toast(
+            err.payload?.message ||
+            'Save failed.',
+            'error'
+          );
+        }
+      }
+    );
+}
+
+async function openOptionValueForm(
+  productId,
+  groupId,
+  valueId = null
+) {
+  const product =
+    await API.get(
+      '/products/' + productId
+    );
+
+  const group =
+    (
+      product.option_groups || []
+    ).find(
+      g => g.id === groupId
+    );
+
+  if (!group) {
+    toast(
+      'Option group not found.',
+      'error'
+    );
+
+    return;
+  }
+
+  const editing =
+    Boolean(valueId);
+
+  const value =
+    editing
+      ? (
+          group.values || []
+        ).find(
+          v => v.id === valueId
+        )
+      : {
+          name: '',
+          available: true,
+          sort_order:
+            (
+              group.values || []
+            ).length + 1,
+        };
+
+  openModal(`
+    <div class="modal-head">
+
+      <div>
+        <h3>
+          ${
+            editing
+              ? 'Edit Option Value'
+              : 'New Option Value'
+          }
+        </h3>
+
+        <small class="text-muted">
+          ${group.name}
+        </small>
+      </div>
+
+      <button
+        class="close-btn"
+        onclick="closeModal()"
+      >
+        ×
+      </button>
+
+    </div>
+
+    <div class="modal-body">
+
+      <div class="field">
+
+        <label>
+          Value Name
+        </label>
+
+        <input
+          id="optionValueName"
+          value="${value.name || ''}"
+          placeholder="e.g. Large"
+        >
+
+      </div>
+
+      <div class="field">
+
+        <label>
+          Sort Order
+        </label>
+
+        <input
+          id="optionValueSort"
+          type="number"
+          min="0"
+          value="${value.sort_order || 0}"
+        >
+
+      </div>
+
+      <div class="field">
+
+        <label
+          style="
+            display:flex;
+            gap:8px;
+            align-items:center;
+          "
+        >
+
+          <input
+            id="optionValueAvailable"
+            type="checkbox"
+            style="width:auto"
+            ${
+              value.available
+                ? 'checked'
+                : ''
+            }
+          >
+
+          Available
+
+        </label>
+
+      </div>
+
+    </div>
+
+    <div class="modal-foot">
+
+      ${
+        editing
+          ? `
+            <button
+              class="btn danger"
+              onclick="
+                app.deleteOptionValue(
+                  ${productId},
+                  ${value.id}
+                )
+              "
+              style="margin-right:auto"
+            >
+              Delete
+            </button>
+          `
+          : ''
+      }
+
+      <button
+        class="btn"
+        onclick="
+          app.openProductConfigurator(
+            ${productId}
+          )
+        "
+      >
+        Cancel
+      </button>
+
+      <button
+        class="btn primary"
+        id="saveOptionValue"
+      >
+        Save
+      </button>
+
+    </div>
+  `);
+
+  $('#saveOptionValue')
+    .addEventListener(
+      'click',
+      async () => {
+
+        const name =
+          $('#optionValueName')
+            .value
+            .trim();
+
+        if (!name) {
+          toast(
+            'Value name is required.',
+            'error'
+          );
+
+          return;
+        }
+
+        const payload = {
+          name,
+
+          available:
+            $('#optionValueAvailable')
+              .checked,
+
+          sort_order:
+            Number(
+              $('#optionValueSort')
+                .value || 0
+            ),
+        };
+
+        try {
+
+          if (editing) {
+            await API.put(
+              '/product-option-values/' +
+                value.id,
+              payload
+            );
+          } else {
+            await API.post(
+              '/product-option-groups/' +
+                group.id +
+                '/values',
+              payload
+            );
+          }
+
+          toast(
+            'Option value saved.'
+          );
+
+          openProductConfigurator(
+            productId
+          );
+
+        } catch (err) {
+          toast(
+            err.payload?.message ||
+            'Save failed.',
+            'error'
+          );
+        }
+      }
+    );
+}
+
+async function openVariantForm(
+  productId,
+  variantId = null
+) {
+  const product =
+    await API.get(
+      '/products/' + productId
+    );
+
+  const groups =
+    product.option_groups || [];
+
+  const editing =
+    Boolean(variantId);
+
+  const variant =
+    editing
+      ? (
+          product.variants || []
+        ).find(
+          v => v.id === variantId
+        )
+      : {
+          name: '',
+          price: 0,
+          available: true,
+          sort_order:
+            (
+              product.variants || []
+            ).length + 1,
+
+          option_values: [],
+        };
+
+  if (!variant) {
+    toast(
+      'Variant not found.',
+      'error'
+    );
+
+    return;
+  }
+
+  const currentValueIds =
+    new Set(
+      (
+        variant.option_values || []
+      ).map(
+        value => Number(value.id)
+      )
+    );
+
+  openModal(`
+    <div class="modal-head">
+
+      <div>
+        <h3>
+          ${
+            editing
+              ? 'Edit Variant'
+              : 'New Variant'
+          }
+        </h3>
+
+        <small class="text-muted">
+          ${product.name}
+        </small>
+      </div>
+
+      <button
+        class="close-btn"
+        onclick="closeModal()"
+      >
+        ×
+      </button>
+
+    </div>
+
+    <div class="modal-body">
+
+      <div class="field">
+
+        <label>
+          Variant Name
+        </label>
+
+        <input
+          id="variantName"
+          value="${variant.name || ''}"
+          placeholder="e.g. Large + Cold"
+        >
+
+      </div>
+
+
+      ${
+        groups.map(group => `
+          <div class="field">
+
+            <label>
+              ${group.name}
+              ${
+                group.required
+                  ? '*'
+                  : ''
+              }
+            </label>
+
+            <select
+              class="variantOptionSelect"
+              data-group-id="${group.id}"
+            >
+
+              ${
+                !group.required
+                  ? `
+                    <option value="">
+                      None
+                    </option>
+                  `
+                  : `
+                    <option value="">
+                      Select...
+                    </option>
+                  `
+              }
+
+              ${
+                (group.values || [])
+                  .map(value => `
+                    <option
+                      value="${value.id}"
+                      ${
+                        currentValueIds
+                          .has(
+                            Number(
+                              value.id
+                            )
+                          )
+                          ? 'selected'
+                          : ''
+                      }
+                      ${
+                        value.available
+                          ? ''
+                          : 'disabled'
+                      }
+                    >
+                      ${value.name}
+                      ${
+                        value.available
+                          ? ''
+                          : ' (Sold Out)'
+                      }
+                    </option>
+                  `)
+                  .join('')
+              }
+
+            </select>
+
+          </div>
+        `).join('')
+      }
+
+
+      <div class="form-row">
+
+        <div class="field">
+
+          <label>
+            Exact Selling Price (RM)
+          </label>
+
+          <input
+            id="variantPrice"
+            type="number"
+            min="0"
+            step="0.01"
+            value="${num(variant.price)}"
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>
+            Sort Order
+          </label>
+
+          <input
+            id="variantSort"
+            type="number"
+            min="0"
+            value="${variant.sort_order || 0}"
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="field">
+
+        <label
+          style="
+            display:flex;
+            align-items:center;
+            gap:8px;
+          "
+        >
+
+          <input
+            id="variantAvailable"
+            type="checkbox"
+            style="width:auto"
+            ${
+              variant.available
+                ? 'checked'
+                : ''
+            }
+          >
+
+          Available
+
+        </label>
+
+        <small class="text-muted">
+          Turn off to mark only this
+          variant as sold out.
+        </small>
+
+      </div>
+
+    </div>
+
+
+    <div class="modal-foot">
+
+      <button
+        class="btn"
+        onclick="
+          app.openProductConfigurator(
+            ${productId}
+          )
+        "
+      >
+        Cancel
+      </button>
+
+      <button
+        class="btn primary"
+        id="saveVariant"
+      >
+        Save Variant
+      </button>
+
+    </div>
+  `, {
+    size: 'lg',
+  });
+
+
+  function generateVariantName() {
+    const names =
+      $$('.variantOptionSelect')
+        .map(select => {
+
+          const option =
+            select.options[
+              select.selectedIndex
+            ];
+
+          return select.value
+            ? option.text
+                .replace(
+                  ' (Sold Out)',
+                  ''
+                )
+            : null;
+        })
+        .filter(Boolean);
+
+    if (names.length) {
+      $('#variantName').value =
+        names.join(' + ');
+    }
+  }
+
+
+  $$('.variantOptionSelect')
+    .forEach(select => {
+      select.addEventListener(
+        'change',
+        generateVariantName
+      );
+    });
+
+
+  $('#saveVariant')
+    .addEventListener(
+      'click',
+      async () => {
+
+        const optionValueIds =
+          $$('.variantOptionSelect')
+            .map(select =>
+              select.value
+                ? Number(
+                    select.value
+                  )
+                : null
+            )
+            .filter(Boolean);
+
+
+        const missingRequired =
+          groups.some(group => {
+
+            if (!group.required) {
+              return false;
+            }
+
+            const select =
+              $(
+                `.variantOptionSelect[data-group-id="${group.id}"]`
+              );
+
+            return !select?.value;
+          });
+
+
+        if (missingRequired) {
+          toast(
+            'Select all required options.',
+            'error'
+          );
+
+          return;
+        }
+
+
+        const name =
+          $('#variantName')
+            .value
+            .trim();
+
+
+        if (!name) {
+          toast(
+            'Variant name is required.',
+            'error'
+          );
+
+          return;
+        }
+
+
+        const payload = {
+          name,
+
+          price:
+            Number(
+              $('#variantPrice')
+                .value || 0
+            ),
+
+          available:
+            $('#variantAvailable')
+              .checked,
+
+          sort_order:
+            Number(
+              $('#variantSort')
+                .value || 0
+            ),
+
+          option_value_ids:
+            optionValueIds,
+        };
+
+
+        try {
+
+          if (editing) {
+            await API.put(
+              '/product-variants/' +
+                variant.id,
+              payload
+            );
+          } else {
+            await API.post(
+              '/products/' +
+                productId +
+                '/variants',
+              payload
+            );
+          }
+
+
+          toast(
+            'Variant saved.'
+          );
+
+          openProductConfigurator(
+            productId
+          );
+
+        } catch (err) {
+
+          const errors =
+            err.payload?.errors;
+
+          const message =
+            errors
+              ? Object.values(
+                  errors
+                )
+                  .flat()[0]
+              : (
+                  err.payload?.message ||
+                  'Save failed.'
+                );
+
+          toast(
+            message,
+            'error'
+          );
+        }
+      }
+    );
+}
+
+async function deleteOptionGroup(
+  productId,
+  groupId
+) {
+  if (
+    !confirm(
+      'Delete this option group and its values?'
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await API.delete(
+      '/product-option-groups/' +
+        groupId
+    );
+
+    toast(
+      'Option group deleted.'
+    );
+
+    openProductConfigurator(
+      productId
+    );
+
+  } catch (err) {
+    toast(
+      err.payload?.message ||
+      'Delete failed.',
+      'error'
+    );
+  }
+}
+
+
+async function deleteOptionValue(
+  productId,
+  valueId
+) {
+  if (
+    !confirm(
+      'Delete this option value?'
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await API.delete(
+      '/product-option-values/' +
+        valueId
+    );
+
+    toast(
+      'Option value deleted.'
+    );
+
+    openProductConfigurator(
+      productId
+    );
+
+  } catch (err) {
+    toast(
+      err.payload?.message ||
+      'Delete failed.',
+      'error'
+    );
+  }
+}
+
+
+async function deleteVariant(
+  productId,
+  variantId
+) {
+  if (
+    !confirm(
+      'Delete this product variant?'
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await API.delete(
+      '/product-variants/' +
+        variantId
+    );
+
+    toast(
+      'Variant deleted.'
+    );
+
+    openProductConfigurator(
+      productId
+    );
+
+  } catch (err) {
+    toast(
+      err.payload?.message ||
+      'Delete failed.',
+      'error'
+    );
+  }
 }
 
 async function deleteProduct(id) {
@@ -5210,8 +9835,25 @@ window.app = {
   takePayment: takePaymentForOrder,
   initRefund,
   // Menu
-  openProductForm, deleteProduct,
-  openCategoryForm, deleteCategory,
+  openProductForm,
+  deleteProduct,
+
+  openProductConfigurator,
+
+  openOptionGroupForm,
+  deleteOptionGroup,
+
+  openOptionValueForm,
+  deleteOptionValue,
+
+  openVariantForm,
+  deleteVariant,
+
+  openCategoryForm,
+  deleteCategory,
+
+  openAddonForm,
+  deleteAddon,
   // Customers
   openCustomerForm, deleteCustomer,
   // Tables

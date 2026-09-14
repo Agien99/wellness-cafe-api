@@ -57,8 +57,33 @@ class OrderController extends Controller
     {
         $data = $request->validate([
             'items'                => ['required', 'array', 'min:1'],
-            'items.*.product_id'   => ['required', 'integer', 'exists:products,id'],
-            'items.*.qty'          => ['required', 'integer', 'min:1'],
+            'items.*.product_id' => [
+                'required',
+                'integer',
+                'exists:products,id',
+            ],
+
+            'items.*.product_variant_id' => [
+                'nullable',
+                'integer',
+                'exists:product_variants,id',
+            ],
+
+            'items.*.addon_ids' => [
+                'nullable',
+                'array',
+            ],
+
+            'items.*.addon_ids.*' => [
+                'integer',
+                'exists:addons,id',
+            ],
+
+            'items.*.qty' => [
+                'required',
+                'integer',
+                'min:1',
+            ],
             'customer_id'          => ['nullable', 'integer', 'exists:customers,id'],
             'channel'              => ['nullable', 'in:pos,qr,online'],
             'table_id'             => ['nullable', 'integer', 'exists:tables,id'],
