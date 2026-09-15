@@ -4376,8 +4376,36 @@ VIEWS.inventory = async (root) => {
             <td class="text-right">${money(num(i.stock)*num(i.cost_per_unit))}</td>
             <td>${isLow?'<span class="badge badge-danger">Low</span>':'<span class="badge badge-success">OK</span>'}</td>
             <td>
-              <button class="btn sm primary" onclick="app.adjustStock(${i.id},'${i.name.replace(/'/g,"\\'")}','${i.unit}')">Adjust</button>
-              <button class="btn sm" onclick="app.openInventoryForm(${i.id})">Edit</button>
+              ${
+                isLow
+                  ? `
+                    <button
+                      class="btn sm"
+                      onclick="app.reorderInventory(${i.id})"
+                    >
+                      🛒 Reorder
+                    </button>
+                  `
+                  : ''
+              }
+
+              <button
+                class="btn sm primary"
+                onclick="app.adjustStock(
+                  ${i.id},
+                  '${i.name.replace(/'/g,"\\'")}',
+                  '${i.unit}'
+                )"
+              >
+                Adjust
+              </button>
+
+              <button
+                class="btn sm"
+                onclick="app.openInventoryForm(${i.id})"
+              >
+                Edit
+              </button>
             </td>
           </tr>`;
         }).join('')}</tbody>
@@ -8898,19 +8926,122 @@ VIEWS.purchase = async (root) => {
   }));
   renderTab('po');
   function renderTab(tab) {
-    if (tab==='po') {
+    if (tab === 'po') {
       $('#poBody').innerHTML = `
-        <div class="card"><table class="data">
-          <thead><tr><th>PO #</th><th>Date</th><th>Supplier</th><th class="text-right">Total</th><th>Status</th><th></th></tr></thead>
-          <tbody>${pos.map(p=>`<tr>
-            <td><b>${p.po_no}</b></td>
-            <td>${fmtDate(p.created_at,false)}</td>
-            <td>${p.supplier?.name||'-'}</td>
-            <td class="text-right"><b>${money(p.total)}</b></td>
-            <td><span class="badge badge-${p.status==='received'?'success':'warn'}">${p.status}</span></td>
-            <td>${p.status==='pending'?`<button class="btn sm primary" onclick="app.receivePurchase(${p.id})">Receive</button>`:''}</td>
-          </tr>`).join('') || '<tr><td colspan="6" class="text-center text-muted">No purchase orders</td></tr>'}</tbody>
-        </table></div>`;
+        <div class="toolbar">
+          <div style="flex:1"></div>
+
+          <button
+            class="btn primary"
+            id="newPurchaseOrderBtn"
+          >
+            + New Purchase Order
+          </button>
+        </div>
+
+        <div class="card">
+          <table class="data">
+
+            <thead>
+              <tr>
+                <th>PO #</th>
+                <th>Date</th>
+                <th>Supplier</th>
+                <th>Expected</th>
+                <th class="text-right">
+                  Total
+                </th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${
+                pos.map(p => `
+                  <tr>
+
+                    <td>
+                      <b>${p.po_no}</b>
+                    </td>
+
+                    <td>
+                      ${fmtDate(
+                        p.created_at,
+                        false
+                      )}
+                    </td>
+
+                    <td>
+                      ${p.supplier?.name || '-'}
+                    </td>
+
+                    <td>
+                      ${
+                        p.expected_date
+                          ? fmtDate(
+                              p.expected_date,
+                              false
+                            )
+                          : '-'
+                      }
+                    </td>
+
+                    <td class="text-right">
+                      <b>
+                        ${money(p.total)}
+                      </b>
+                    </td>
+
+                    <td>
+                      <span
+                        class="badge badge-${
+                          p.status === 'received'
+                            ? 'success'
+                            : 'warn'
+                        }"
+                      >
+                        ${p.status}
+                      </span>
+                    </td>
+
+                    <td class="text-right">
+
+                      <button
+                        class="btn sm"
+                        onclick="app.viewPurchaseOrder(${p.id})"
+                      >
+                        View
+                      </button>
+
+                    </td>
+
+                  </tr>
+                `).join('')
+                ||
+                `
+                  <tr>
+                    <td
+                      colspan="7"
+                      class="text-center text-muted"
+                      style="padding:30px"
+                    >
+                      No purchase orders
+                    </td>
+                  </tr>
+                `
+              }
+            </tbody>
+
+          </table>
+        </div>
+      `;
+
+      $('#newPurchaseOrderBtn')
+        .addEventListener(
+          'click',
+          () => openPurchaseOrderForm()
+        );
     } else {
       $('#poBody').innerHTML = `
         <div class="toolbar"><button class="btn primary" onclick="app.openSupplierForm()">+ New Supplier</button></div>
@@ -8928,6 +9059,1028 @@ VIEWS.purchase = async (root) => {
     }
   }
 };
+
+async function openPurchaseOrderForm(
+  prefill = null
+) {
+  try {
+
+    const [suppliers, inventory] =
+      await Promise.all([
+        API.get('/suppliers'),
+        API.get('/inventory'),
+      ]);
+
+    if (!suppliers.length) {
+      toast(
+        'Please create a supplier first.',
+        'warn'
+      );
+      return;
+    }
+
+    if (!inventory.length) {
+      toast(
+        'Please create an inventory item first.',
+        'warn'
+      );
+      return;
+    }
+
+    openModal(`
+      <div class="modal-head">
+
+        <div>
+          <h3>
+            New Purchase Order
+          </h3>
+
+          <small class="text-muted">
+            Order inventory stock from a supplier
+          </small>
+        </div>
+
+        <button
+          class="close-btn"
+          onclick="closeModal()"
+        >
+          ×
+        </button>
+
+      </div>
+
+      <div class="modal-body">
+
+        <div class="form-row">
+
+          <div class="field">
+            <label>Supplier</label>
+
+            <select id="poSupplier">
+
+              ${
+                suppliers.map(s => `
+
+                  <option
+                    value="${s.id}"
+
+                    ${
+                      Number(s.id) ===
+                      Number(prefill?.supplier_id)
+                        ? 'selected'
+                        : ''
+                    }
+                  >
+                    ${s.name}
+                  </option>
+
+                `).join('')
+              }
+
+            </select>
+          </div>
+
+          <div class="field">
+            <label>
+              Expected Delivery
+            </label>
+
+            <input
+              type="date"
+              id="poExpectedDate"
+            >
+          </div>
+
+        </div>
+
+        <div
+          class="section-title"
+          style="margin-top:20px"
+        >
+          Items
+        </div>
+
+        <div id="poItems"></div>
+
+        <button
+          type="button"
+          class="btn"
+          id="poAddItem"
+          style="margin-top:10px"
+        >
+          + Add Item
+        </button>
+
+        <div
+          style="
+            margin-top:20px;
+            padding-top:16px;
+            border-top:1px solid var(--border);
+            display:flex;
+            justify-content:flex-end;
+            align-items:center;
+            gap:15px;
+          "
+        >
+
+          <span class="text-muted">
+            Purchase Total
+          </span>
+
+          <b
+            id="poTotal"
+            style="font-size:22px"
+          >
+            ${money(0)}
+          </b>
+
+        </div>
+
+      </div>
+
+      <div class="modal-foot">
+
+        <button
+          class="btn"
+          onclick="closeModal()"
+        >
+          Cancel
+        </button>
+
+        <button
+          class="btn primary"
+          id="poCreate"
+        >
+          Create Purchase Order
+        </button>
+
+      </div>
+    `, {
+      size: 'lg'
+    });
+
+
+    const container =
+      $('#poItems');
+
+
+    function recalculate() {
+
+      let total = 0;
+
+      $$('.po-item-row', container)
+        .forEach(row => {
+
+          const qty =
+            num(
+              $('.po-qty', row).value
+            );
+
+          const cost =
+            num(
+              $('.po-cost', row).value
+            );
+
+          const subtotal =
+            qty * cost;
+
+          $('.po-subtotal', row)
+            .value =
+              money(subtotal);
+
+          total += subtotal;
+        });
+
+      $('#poTotal').textContent =
+        money(total);
+    }
+
+
+    function addRow(
+      selectedItemId = null
+    ) {
+
+      const row =
+        document.createElement('div');
+
+      row.className =
+        'po-item-row';
+
+      row.style.cssText = `
+        display:grid;
+        grid-template-columns:
+          minmax(180px,2fr)
+          90px
+          120px
+          130px
+          auto;
+        gap:10px;
+        align-items:end;
+        margin-bottom:12px;
+      `;
+
+
+      row.innerHTML = `
+
+        <div
+          class="field"
+          style="margin:0"
+        >
+
+          <label>
+            Inventory Item
+          </label>
+
+          <select class="po-item">
+
+            ${inventory.map(i => `
+              <option
+                value="${i.id}"
+
+                data-cost="${
+                  num(i.cost_per_unit)
+                }"
+
+                ${
+                  Number(i.id) ===
+                  Number(selectedItemId)
+                    ? 'selected'
+                    : ''
+                }
+              >
+                ${i.name} (${i.unit})
+              </option>
+            `).join('')}
+
+          </select>
+
+        </div>
+
+
+        <div
+          class="field"
+          style="margin:0"
+        >
+
+          <label>Qty</label>
+
+          <input
+            type="number"
+            class="po-qty"
+            min="0.01"
+            step="0.01"
+            value="1"
+          >
+
+        </div>
+
+
+        <div
+          class="field"
+          style="margin:0"
+        >
+
+          <label>
+            Unit Cost
+          </label>
+
+          <input
+            type="number"
+            class="po-cost"
+            min="0"
+            step="0.01"
+            value="${
+              num(
+                (
+                  inventory.find(
+                    i =>
+                      Number(i.id) ===
+                      Number(selectedItemId)
+                  ) ||
+                  inventory[0]
+                ).cost_per_unit
+              ).toFixed(2)
+            }"
+          >
+
+        </div>
+
+
+        <div
+          class="field"
+          style="margin:0"
+        >
+
+          <label>
+            Subtotal
+          </label>
+
+          <input
+            class="po-subtotal"
+            disabled
+          >
+
+        </div>
+
+
+        <button
+          type="button"
+          class="btn danger sm po-remove"
+          title="Remove"
+        >
+          ×
+        </button>
+
+      `;
+
+
+      container.appendChild(row);
+
+
+      const itemSelect =
+        $('.po-item', row);
+
+      const qtyInput =
+        $('.po-qty', row);
+
+      const costInput =
+        $('.po-cost', row);
+
+
+      itemSelect.addEventListener(
+        'change',
+        () => {
+
+          const option =
+            itemSelect.options[
+              itemSelect.selectedIndex
+            ];
+
+          costInput.value =
+            num(
+              option.dataset.cost
+            ).toFixed(2);
+
+          recalculate();
+        }
+      );
+
+
+      qtyInput.addEventListener(
+        'input',
+        recalculate
+      );
+
+
+      costInput.addEventListener(
+        'input',
+        recalculate
+      );
+
+
+      $('.po-remove', row)
+        .addEventListener(
+          'click',
+          () => {
+
+            row.remove();
+
+            recalculate();
+          }
+        );
+
+
+      recalculate();
+    }
+
+
+    $('#poAddItem')
+      .addEventListener(
+        'click',
+        addRow
+      );
+
+
+    // Start with one item row.
+    // If opened from Inventory,
+    // preselect that inventory item.
+    addRow(
+      prefill?.inventory_item_id || null
+    );
+
+
+    $('#poCreate')
+      .addEventListener(
+        'click',
+        async () => {
+
+          const rows =
+            $$('.po-item-row', container);
+
+
+          if (!rows.length) {
+
+            toast(
+              'Add at least one item.',
+              'error'
+            );
+
+            return;
+          }
+
+
+          const items =
+            rows.map(row => ({
+
+              inventory_item_id:
+                Number(
+                  $('.po-item', row)
+                    .value
+                ),
+
+              qty:
+                num(
+                  $('.po-qty', row)
+                    .value
+                ),
+
+              cost:
+                num(
+                  $('.po-cost', row)
+                    .value
+                ),
+
+            }));
+
+
+          if (
+            items.some(
+              item => item.qty <= 0
+            )
+          ) {
+
+            toast(
+              'Quantity must be greater than 0.',
+              'error'
+            );
+
+            return;
+          }
+
+
+          const button =
+            $('#poCreate');
+
+          button.disabled = true;
+
+          button.textContent =
+            'Creating...';
+
+
+          try {
+
+            const po =
+              await API.post(
+                '/purchase-orders',
+                {
+
+                  supplier_id:
+                    Number(
+                      $('#poSupplier')
+                        .value
+                    ),
+
+                  expected_date:
+                    $('#poExpectedDate')
+                      .value || null,
+
+                  items,
+
+                }
+              );
+
+
+            toast(
+              `Purchase order ${po.po_no} created.`
+            );
+
+
+            closeModal();
+
+            route('purchase');
+
+          }
+          catch (err) {
+
+            button.disabled = false;
+
+            button.textContent =
+              'Create Purchase Order';
+
+            toast(
+              err.payload?.message ||
+              'Could not create purchase order.',
+              'error'
+            );
+          }
+        }
+      );
+
+  }
+  catch (err) {
+
+    console.error(err);
+
+    toast(
+      'Could not load purchase order form.',
+      'error'
+    );
+  }
+}
+
+function reorderInventory(id) {
+
+  const items =
+    state._inventoryCache || [];
+
+  const item =
+    items.find(
+      i =>
+        Number(i.id) ===
+        Number(id)
+    );
+
+
+  if (!item) {
+
+    toast(
+      'Inventory item not found.',
+      'error'
+    );
+
+    return;
+  }
+
+
+  if (!item.supplier_id) {
+
+    toast(
+      `${item.name} does not have a supplier assigned.`,
+      'warn'
+    );
+
+    return;
+  }
+
+
+  openPurchaseOrderForm({
+
+    inventory_item_id:
+      item.id,
+
+    supplier_id:
+      item.supplier_id,
+
+  });
+}
+
+async function viewPurchaseOrder(id) {
+
+  try {
+
+    const po =
+      await API.get(
+        `/purchase-orders/${id}`
+      );
+
+
+    const isPending =
+      po.status === 'pending';
+
+
+    openModal(`
+      <div class="modal-head">
+
+        <div>
+
+          <h3>
+            Purchase Order
+            ${po.po_no}
+          </h3>
+
+          <small class="text-muted">
+            ${
+              po.supplier?.name ||
+              'Unknown Supplier'
+            }
+          </small>
+
+        </div>
+
+
+        <button
+          class="close-btn"
+          onclick="closeModal()"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <div class="modal-body">
+
+        <div
+          class="grid-2"
+          style="margin-bottom:20px"
+        >
+
+          <div class="card">
+
+            <div
+              class="text-muted"
+              style="font-size:12px"
+            >
+              Supplier
+            </div>
+
+            <b>
+              ${
+                po.supplier?.name ||
+                '-'
+              }
+            </b>
+
+          </div>
+
+
+          <div class="card">
+
+            <div
+              class="text-muted"
+              style="font-size:12px"
+            >
+              Status
+            </div>
+
+            <span
+              class="badge badge-${
+                po.status === 'received'
+                  ? 'success'
+                  : 'warn'
+              }"
+            >
+              ${po.status}
+            </span>
+
+          </div>
+
+
+          <div class="card">
+
+            <div
+              class="text-muted"
+              style="font-size:12px"
+            >
+              Created
+            </div>
+
+            <b>
+              ${
+                fmtDate(
+                  po.created_at,
+                  false
+                )
+              }
+            </b>
+
+          </div>
+
+
+          <div class="card">
+
+            <div
+              class="text-muted"
+              style="font-size:12px"
+            >
+              Expected Delivery
+            </div>
+
+            <b>
+              ${
+                po.expected_date
+                  ? fmtDate(
+                      po.expected_date,
+                      false
+                    )
+                  : '-'
+              }
+            </b>
+
+          </div>
+
+        </div>
+
+
+        <div class="section-title">
+          Items
+        </div>
+
+
+        <div
+          class="card"
+          style="padding:0"
+        >
+
+          <table class="data">
+
+            <thead>
+
+              <tr>
+                <th>Inventory Item</th>
+
+                <th class="text-right">
+                  Qty
+                </th>
+
+                <th class="text-right">
+                  Unit Cost
+                </th>
+
+                <th class="text-right">
+                  Subtotal
+                </th>
+              </tr>
+
+            </thead>
+
+
+            <tbody>
+
+              ${
+                (po.items || [])
+                  .map(item => {
+
+                    const qty =
+                      num(item.qty);
+
+                    const cost =
+                      num(item.cost);
+
+                    return `
+                      <tr>
+
+                        <td>
+                          <b>
+                            ${
+                              item
+                                .inventory_item
+                                ?.name ||
+                              'Inventory Item'
+                            }
+                          </b>
+
+                          ${
+                            item
+                              .inventory_item
+                              ?.unit
+                              ? `
+                                <div
+                                  class="text-muted"
+                                  style="font-size:11px"
+                                >
+                                  Unit:
+                                  ${
+                                    item
+                                      .inventory_item
+                                      .unit
+                                  }
+                                </div>
+                              `
+                              : ''
+                          }
+                        </td>
+
+
+                        <td class="text-right">
+                          ${qty}
+                        </td>
+
+
+                        <td class="text-right">
+                          ${money(cost)}
+                        </td>
+
+
+                        <td class="text-right">
+                          <b>
+                            ${
+                              money(
+                                qty *
+                                cost
+                              )
+                            }
+                          </b>
+                        </td>
+
+                      </tr>
+                    `;
+                  })
+                  .join('')
+              }
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+
+        <div
+          style="
+            display:flex;
+            justify-content:flex-end;
+            align-items:center;
+            gap:20px;
+            margin-top:18px;
+          "
+        >
+
+          <span class="text-muted">
+            Purchase Total
+          </span>
+
+          <strong
+            style="font-size:24px"
+          >
+            ${money(po.total)}
+          </strong>
+
+        </div>
+
+
+        ${
+          isPending
+            ? `
+              <div
+                class="alert alert-info"
+                style="margin-top:20px"
+              >
+
+                <b>
+                  Stock has not been received yet.
+                </b>
+
+                <br>
+
+                Inventory quantities will only
+                increase when this purchase order
+                is received.
+
+              </div>
+            `
+            : `
+              <div
+                class="alert alert-success"
+                style="margin-top:20px"
+              >
+
+                ✓ This purchase order has been
+                received and added to inventory.
+
+                ${
+                  po.received_at
+                    ? `
+                      <br>
+
+                      Received:
+                      <b>
+                        ${
+                          fmtDate(
+                            po.received_at
+                          )
+                        }
+                      </b>
+                    `
+                    : ''
+                }
+
+              </div>
+            `
+        }
+
+      </div>
+
+
+      <div class="modal-foot">
+
+        <button
+          class="btn"
+          onclick="closeModal()"
+        >
+          Close
+        </button>
+
+
+        ${
+          isPending
+            ? `
+              <button
+                class="btn primary"
+                id="receivePurchaseOrderBtn"
+              >
+                ✓ Receive Stock
+              </button>
+            `
+            : ''
+        }
+
+      </div>
+    `, {
+      size: 'lg'
+    });
+
+
+    if (isPending) {
+
+      $('#receivePurchaseOrderBtn')
+        .addEventListener(
+          'click',
+          async () => {
+
+            const confirmed =
+              confirm(
+                `Receive ${po.po_no}?\n\n` +
+                'This will add all quantities in this purchase order to inventory.'
+              );
+
+
+            if (!confirmed) {
+              return;
+            }
+
+
+            const button =
+              $('#receivePurchaseOrderBtn');
+
+
+            button.disabled = true;
+
+            button.textContent =
+              'Receiving...';
+
+
+            try {
+
+              await API.post(
+                `/purchase-orders/${po.id}/receive`,
+                {}
+              );
+
+
+              toast(
+                `${po.po_no} received. Inventory updated.`
+              );
+
+
+              closeModal();
+
+              route('purchase');
+
+            }
+            catch (err) {
+
+              button.disabled = false;
+
+              button.textContent =
+                '✓ Receive Stock';
+
+
+              toast(
+                err.payload?.message ||
+                'Could not receive purchase order.',
+                'error'
+              );
+            }
+          }
+        );
+    }
+
+  }
+  catch (err) {
+
+    console.error(
+      'Purchase order error:',
+      err
+    );
+
+
+    toast(
+      'Could not load purchase order.',
+      'error'
+    );
+  }
+}
 
 async function openSupplierForm(id) {
   const isNew = !id;
@@ -10115,21 +11268,15 @@ window.app = {
   // Menu
   openProductForm,
   deleteProduct,
-
   openProductConfigurator,
-
   openOptionGroupForm,
   deleteOptionGroup,
-
   openOptionValueForm,
   deleteOptionValue,
-
   openVariantForm,
   deleteVariant,
-
   openCategoryForm,
   deleteCategory,
-
   openAddonForm,
   deleteAddon,
   // Customers
@@ -10141,6 +11288,9 @@ window.app = {
   // Suppliers + Purchase
   openSupplierForm, deleteSupplier,
   receivePurchase,
+  openPurchaseOrderForm,
+  viewPurchaseOrder,
+  reorderInventory,
   // Inventory
   openInventoryForm, deleteInventory,
   adjustStock,
