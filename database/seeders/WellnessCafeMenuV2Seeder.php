@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Product;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class WellnessCafeMenuV2Seeder extends Seeder
 {
@@ -22,7 +23,7 @@ class WellnessCafeMenuV2Seeder extends Seeder
         |
         */
 
-        DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+        Schema::disableForeignKeyConstraints();
 
         DB::table('product_variant_values')->truncate();
         DB::table('product_addons')->truncate();
@@ -33,7 +34,7 @@ class WellnessCafeMenuV2Seeder extends Seeder
         DB::table('products')->truncate();
         DB::table('categories')->truncate();
 
-        DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+        Schema::enableForeignKeyConstraints();
 
         /*
         |--------------------------------------------------------------------------
