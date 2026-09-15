@@ -321,6 +321,29 @@ async function reprintOrderReceipt(
   }
 }
 
+function androidPrintSuccess() {
+  console.log(
+    'Android receipt print successful.'
+  );
+
+  toast(
+    'Receipt printed successfully.',
+    'success'
+  );
+}
+
+function androidPrintFailed(error) {
+  console.error(
+    'Android receipt print failed:',
+    error
+  );
+
+  toast(
+    'Payment is saved, but receipt printing failed. You can reprint it from Order Details.',
+    'warn'
+  );
+}
+
 function orderItemConfigHtml(
   item,
   options = {}
@@ -11571,6 +11594,8 @@ window.app = {
   viewOrder: viewOrderDetail,
   takePayment: takePaymentForOrder,
   reprintReceipt: reprintOrderReceipt,
+  androidPrintSuccess,
+  androidPrintFailed,
   initRefund,
   // Menu
   openProductForm,
