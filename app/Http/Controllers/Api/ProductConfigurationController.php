@@ -305,12 +305,14 @@ class ProductConfigurationController extends Controller
         Product $product
     ): JsonResponse {
         $data = $request->validate([
-            'addon_ids'   => ['required', 'array'],
+            'addon_ids'   => ['nullable', 'array'],
             'addon_ids.*' => ['integer', 'exists:addons,id'],
         ]);
 
+        $addonIds = $data['addon_ids'] ?? [];
+
         $product->addons()->sync(
-            array_unique($data['addon_ids'])
+            array_unique($addonIds)
         );
 
         return response()->json(
