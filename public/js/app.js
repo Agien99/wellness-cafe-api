@@ -91,6 +91,236 @@ function closeModal() { $('#modalRoot').innerHTML = ''; }
 // Decimal fields from Laravel come as strings; normalize for arithmetic
 function num(v) { return v === null || v === undefined ? 0 : +v; }
 
+function isAndroidPOS() {
+  return (
+    typeof window.AndroidPOS !== 'undefined' &&
+    typeof window.AndroidPOS.printReceipt === 'function'
+  );
+}
+
+function buildAndroidReceipt(
+  order,
+  method,
+  amountReceived = null
+) {
+  const total = num(order.total);
+
+  return {
+    order_no:
+      order.order_no || '-',
+
+    date:
+      fmtDate(
+        order.paid_at ||
+        order.updated_at ||
+        order.created_at
+      ),
+
+    cashier:
+      order.cashier?.name ||
+      currentUser?.name ||
+      '-',
+
+    customer:
+      order.customer_name ||
+      order.customer?.name ||
+      'Walk-in',
+
+    order_type:
+      order.channel === 'qr'
+        ? 'QR Order'
+        : 'Counter',
+
+    table:
+      order.table
+        ? (
+            order.table.name ||
+            `Table ${order.table_id}`
+          )
+        : '',
+
+    items:
+      (order.items || []).map(item => ({
+        name:
+          item.name || 'Item',
+
+        variant:
+          item.variant_name || '',
+
+        qty:
+          num(item.qty),
+
+        total:
+          num(item.price) *
+          num(item.qty),
+
+        addons:
+          (item.addons || []).map(addon => ({
+            name:
+              addon.name || 'Add-on',
+
+            price:
+              num(addon.price)
+          }))
+      })),
+
+    subtotal:
+      num(order.subtotal),
+
+    discount:
+      num(order.discount),
+
+    tax:
+      num(order.tax),
+
+    total,
+
+    payment_method:
+      method.toUpperCase(),
+
+    ...(method === 'cash' &&
+       amountReceived !== null
+      ? {
+          amount_received:
+            amountReceived,
+
+          change:
+            Math.max(
+              0,
+              amountReceived - total
+            )
+        }
+      : {})
+  };
+}
+
+function printAndroidReceipt(
+  order,
+  method,
+  amountReceived = null,
+  openDrawerAfterPrint = true
+) {
+  if (!isAndroidPOS()) {
+    return false;
+  }
+
+  try {
+    const receipt =
+      buildAndroidReceipt(
+        order,
+        method,
+        amountReceived
+      );
+
+    /*
+     * Drawer is opened by Android only
+     * AFTER receipt printing succeeds.
+     *
+     * Normal cash payment:
+     *   true
+     *
+     * Card / E-Wallet / QR:
+     *   false
+     *
+     * Reprint:
+     *   false
+     */
+    const shouldOpenDrawer =
+      openDrawerAfterPrint &&
+      method === 'cash';
+
+    window.AndroidPOS.printReceipt(
+      JSON.stringify(receipt),
+      shouldOpenDrawer
+    );
+
+    return true;
+
+  } catch (err) {
+    console.error(
+      'Android receipt printing failed:',
+      err
+    );
+
+    toast(
+      'Payment successful, but receipt printing failed.',
+      'warn'
+    );
+
+    return false;
+  }
+}
+
+async function reprintOrderReceipt(
+  orderId
+) {
+  if (!isAndroidPOS()) {
+    toast(
+      'Receipt printer is only available in the Wellness Cafe POS Android app.',
+      'warn'
+    );
+
+    return;
+  }
+
+  try {
+    const order =
+      await API.get(
+        '/orders/' + orderId
+      );
+
+    if (!order.payment) {
+      toast(
+        'This order has no payment record.',
+        'warn'
+      );
+
+      return;
+    }
+
+    const method =
+      (
+        order.payment.method ||
+        'cash'
+      ).toLowerCase();
+
+    /*
+     * Reprint intentionally does NOT
+     * open the cash drawer.
+     *
+     * amountReceived is also unavailable
+     * from historical orders, so we do not
+     * recreate Received / Change values.
+     */
+    const sent =
+      printAndroidReceipt(
+        order,
+        method,
+        null,
+        false
+      );
+
+    if (sent) {
+      toast(
+        `Receipt ${order.order_no} sent to printer.`,
+        'success'
+      );
+    }
+
+  } catch (err) {
+    console.error(
+      'Receipt reprint failed:',
+      err
+    );
+
+    toast(
+      err.payload?.message ||
+      'Could not reprint receipt.',
+      'error'
+    );
+  }
+}
+
 function orderItemConfigHtml(
   item,
   options = {}
@@ -3938,6 +4168,20 @@ async function viewOrderDetail(orderId) {
             : ''
         }
 
+        ${
+          !isPending &&
+          o.payment
+            ? `
+              <button
+                class="btn"
+                onclick="app.reprintReceipt(${o.id})"
+              >
+                🖨 Reprint Receipt
+              </button>
+            `
+            : ''
+        }
+
 
         ${
           o.status === 'completed'
@@ -4218,22 +4462,84 @@ async function takePaymentForOrder(orderId) {
     $('#changeAmt2').textContent = state.meta.currency + ' ' + Math.max(0, change).toFixed(2);
   });
   $('#confirmTakePay').addEventListener('click', async () => {
+    let amountReceived = null;
+
     if (method === 'cash') {
-      const amt = +$('#amtRcv2').value;
-      if (amt < total) { toast('Insufficient amount', 'error'); return; }
+      amountReceived =
+        +$('#amtRcv2').value;
+
+      if (amountReceived < total) {
+        toast(
+          'Insufficient amount',
+          'error'
+        );
+
+        return;
+      }
     }
-    const btn = $('#confirmTakePay');
-    btn.disabled = true; btn.textContent = 'Processing...';
+
+    const btn =
+      $('#confirmTakePay');
+
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+
     try {
-      const order = await API.post(`/orders/${o.id}/payment`, { method });
-      toast(`Payment received: ${method.toUpperCase()} ${money(total)}`);
+      /*
+      * IMPORTANT:
+      * Payment is completed FIRST.
+      */
+      const order =
+        await API.post(
+          `/orders/${o.id}/payment`,
+          { method }
+        );
+
+      toast(
+        `Payment received: ` +
+        `${method.toUpperCase()} ` +
+        `${money(total)}`
+      );
+
       closeModal();
-      showCounterReceipt(order, method);
-      // Refresh customer cache (loyalty may have changed)
-      state.customers = await API.get('/customers');
+
+      /*
+      * Existing browser receipt.
+      */
+      showCounterReceipt(
+        order,
+        method
+      );
+
+      /*
+      * Android hardware receipt.
+      *
+      * Printing happens only AFTER
+      * successful payment.
+      */
+      printAndroidReceipt(
+        order,
+        method,
+        amountReceived
+      );
+
+      /*
+      * Refresh customer cache.
+      * Loyalty may have changed.
+      */
+      state.customers =
+        await API.get('/customers');
+
     } catch (err) {
-      btn.disabled = false; btn.textContent = '✓ Confirm Payment';
-      toast(err.payload?.message || 'Payment failed', 'error');
+      btn.disabled = false;
+      btn.textContent =
+        '✓ Confirm Payment';
+
+      toast(
+        err.payload?.message ||
+        'Payment failed',
+        'error'
+      );
     }
   });
 }
@@ -11264,6 +11570,7 @@ window.app = {
   closeModal,
   viewOrder: viewOrderDetail,
   takePayment: takePaymentForOrder,
+  reprintReceipt: reprintOrderReceipt,
   initRefund,
   // Menu
   openProductForm,
