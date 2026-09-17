@@ -2957,21 +2957,38 @@ VIEWS.pos = async (root) => {
       );
 
       /*
-      * Send the completed sale to the
-      * Android thermal printer.
+      * Fetch the complete saved order before
+      * sending it to the Android printer.
       *
-      * Cash:
-      * receipt → drawer
-      *
-      * Non-cash:
-      * receipt only
+      * This uses the same detailed order data
+      * that the working Reprint Receipt uses.
       */
-      printAndroidReceipt(
-        order,
-        method
-      );
+      try {
+        const printableOrder =
+          await API.get(
+            '/orders/' + order.id
+          );
+
+        printAndroidReceipt(
+          printableOrder,
+          method
+        );
+
+      } catch (printErr) {
+        console.error(
+          'Could not prepare completed sale receipt:',
+          printErr
+        );
+
+        toast(
+          'Sale completed, but receipt could not be prepared for printing.',
+          'warn'
+        );
+      }
 
       pos.cart = [];
+
+      clearAppliedPromo();
 
       pos.customerId = 8;
       pos.tableId = null;
@@ -3239,7 +3256,6 @@ VIEWS.pos = async (root) => {
 
         <button
           class="btn"
-          onclick="window.print()"
           id="printSaleReceipt"
         >
           🖨 Print Receipt
@@ -3258,13 +3274,31 @@ VIEWS.pos = async (root) => {
     $('#printSaleReceipt')
       ?.addEventListener(
         'click',
-        () => {
-          printAndroidReceipt(
-            order,
-            method,
-            null,
-            false
-          );
+        async () => {
+          try {
+            const printableOrder =
+              await API.get(
+                '/orders/' + order.id
+              );
+
+            printAndroidReceipt(
+              printableOrder,
+              method,
+              null,
+              false
+            );
+
+          } catch (err) {
+            console.error(
+              'Receipt print failed:',
+              err
+            );
+
+            toast(
+              'Could not prepare receipt for printing.',
+              'error'
+            );
+          }
         }
       );
   }
