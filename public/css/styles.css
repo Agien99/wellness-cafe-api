@@ -373,7 +373,41 @@ table.data tr:hover{background:#f9fafb}
    ============================================ */
 
 .mobile-menu-btn{
-  display:none;
+  width:40px;
+  height:40px;
+
+  flex-shrink:0;
+
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+
+  gap:4px;
+
+  border:1px solid var(--border);
+  border-radius:10px;
+
+  background:#fff;
+
+  box-shadow:
+    0 1px 2px
+    rgba(0,0,0,.04);
+}
+
+.mobile-menu-btn span{
+  display:block;
+
+  width:18px;
+  height:2px;
+
+  border-radius:999px;
+
+  background:#374151;
+}
+
+.mobile-menu-btn:hover{
+  background:#f3f4f6;
 }
 
 .sidebar-close{
@@ -382,6 +416,31 @@ table.data tr:hover{background:#f9fafb}
 
 .sidebar-backdrop{
   display:none;
+}
+
+
+/* Desktop / laptop / landscape tablet sidebar collapse */
+@media(min-width:901px){
+
+  .sidebar{
+    width:240px;
+
+    transition:
+      width .22s ease,
+      padding .22s ease;
+
+    overflow:hidden;
+  }
+
+  body.sidebar-collapsed .sidebar{
+    width:0;
+    padding-left:0;
+    padding-right:0;
+  }
+
+  body.sidebar-collapsed .sidebar > *{
+    visibility:hidden;
+  }
 }
 
 

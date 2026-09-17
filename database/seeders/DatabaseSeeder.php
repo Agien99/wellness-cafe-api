@@ -11,12 +11,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RoleSeeder::class,
             UserSeeder::class,
-            SupplierSeeder::class,
-            InventoryItemSeeder::class,
-            CustomerSeeder::class,
             TableSeeder::class,
-            PromotionSeeder::class,
-            LoyaltyTierSeeder::class,
             WellnessCafeMenuV2Seeder::class,
         ]);
     }
