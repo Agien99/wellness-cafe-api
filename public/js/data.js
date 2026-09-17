@@ -15,7 +15,7 @@ const SEED_DATA = {
     tagline: "Relax . Reflect . Recharge",
     address: "Ground Floor, Block 7, FPM, UPSI",
     phone: "+60 5-450 6000",
-    taxRate: 0.06,           // 6% SST
+    taxRate: 0.00,           // 6% SST
     serviceCharge: 0.0,
     currency: "RM",
     seededAt: new Date().toISOString()
@@ -270,8 +270,8 @@ const SEED_DATA = {
         subtotal += p.price * qty;
       }
       if (items.length === 0) continue;
-      const tax = subtotal * SEED_DATA.meta.taxRate;
-      const total = subtotal + tax;
+      const tax = 0;
+      const total = subtotal;
       const customerIdx = Math.random() < 0.45 ? 7 : Math.floor(Math.random() * 7);
       const customer = SEED_DATA.customers[customerIdx];
       const channel = channels[Math.floor(Math.random() * channels.length)];

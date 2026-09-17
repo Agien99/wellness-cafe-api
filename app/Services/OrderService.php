@@ -34,9 +34,7 @@ use App\Models\LoyaltyTier;
  */
 class OrderService
 {
-    public function __construct(
-        private readonly float $taxRate = 0.06
-    ) {}
+    public function __construct() {}
 
     /**
      * Create a new order.
@@ -352,18 +350,20 @@ class OrderService
                 $subtotal
             );
 
-            $taxBase = max(
-                0,
-                $subtotal - $totalDiscount
-            );
-
-            $tax = round(
-                $taxBase * $this->taxRate,
-                2
-            );
+            /*
+            * Product prices are already inclusive
+            * of 6% SST.
+            *
+            * Do not add SST on top of the
+            * customer-facing price.
+            */
+            $tax = 0.00;
 
             $total = round(
-                $taxBase + $tax,
+                max(
+                    0,
+                    $subtotal - $totalDiscount
+                ),
                 2
             );
 

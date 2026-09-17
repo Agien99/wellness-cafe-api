@@ -176,7 +176,7 @@
 
 <script>
 const BASE_API = '/api/public';
-let cafe = { name:'Wellness Cafe', currency:'RM', tax_rate:0.06 };
+let cafe = { name:'Wellness Cafe', currency:'RM', tax_rate:0.00 };
 let categories = [];
 let products = [];
 let tables = [];
@@ -866,11 +866,10 @@ function openCart() {
       sub - memberDiscount
     );
 
-  const tax =
-    taxBase * cafe.tax_rate;
+  const tax = 0;
 
   const total =
-    taxBase + tax;
+    taxBase;
   const html = `
     <div class="modal-head"><h3>🛒 Your Order</h3><button class="close-btn" onclick="document.getElementById('modalRoot').innerHTML=''">×</button></div>
     <div class="modal-body">
@@ -936,13 +935,6 @@ function openCart() {
             `
             : ''
         }
-
-        <div class="sum-line">
-          <span>
-            Tax (${(cafe.tax_rate * 100).toFixed(0)}%)
-          </span>
-          <span>${money(tax)}</span>
-        </div>
 
         <div class="sum-line total">
           <span>Total</span>
