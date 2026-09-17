@@ -194,7 +194,76 @@ function buildAndroidReceipt(
   };
 }
 
-function printAndroidReceipt(
+async function getReceiptLogoBase64() {
+  try {
+    const response =
+      await fetch(
+        '/img/logo.png'
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        'Logo could not be loaded'
+      );
+    }
+
+    const blob =
+      await response.blob();
+
+    return await new Promise(
+      (resolve, reject) => {
+        const reader =
+          new FileReader();
+
+        reader.onloadend =
+          () => {
+            const result =
+              reader.result;
+
+            if (
+              typeof result !==
+              'string'
+            ) {
+              reject(
+                new Error(
+                  'Invalid logo data'
+                )
+              );
+
+              return;
+            }
+
+            resolve(
+              result.split(',')[1]
+            );
+          };
+
+        reader.onerror =
+          () => {
+            reject(
+              new Error(
+                'Logo could not be read'
+              )
+            );
+          };
+
+        reader.readAsDataURL(
+          blob
+        );
+      }
+    );
+
+  } catch (err) {
+    console.error(
+      'Receipt logo failed:',
+      err
+    );
+
+    return null;
+  }
+}
+
+async function printAndroidReceipt(
   order,
   method,
   amountReceived = null,
@@ -211,6 +280,14 @@ function printAndroidReceipt(
         method,
         amountReceived
       );
+
+    const logoBase64 =
+      await getReceiptLogoBase64();
+
+    if (logoBase64) {
+      receipt.logo_base64 =
+        logoBase64;
+    }
 
     /*
      * Drawer is opened by Android only
