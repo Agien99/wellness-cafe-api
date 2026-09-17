@@ -2956,9 +2956,22 @@ VIEWS.pos = async (root) => {
         method
       );
 
-      pos.cart = [];
+      /*
+      * Send the completed sale to the
+      * Android thermal printer.
+      *
+      * Cash:
+      * receipt → drawer
+      *
+      * Non-cash:
+      * receipt only
+      */
+      printAndroidReceipt(
+        order,
+        method
+      );
 
-      clearAppliedPromo();
+      pos.cart = [];
 
       pos.customerId = 8;
       pos.tableId = null;
@@ -3227,8 +3240,9 @@ VIEWS.pos = async (root) => {
         <button
           class="btn"
           onclick="window.print()"
+          id="printSaleReceipt"
         >
-          🖨 Print
+          🖨 Print Receipt
         </button>
 
         <button
@@ -3240,6 +3254,19 @@ VIEWS.pos = async (root) => {
 
       </div>
     `);
+
+    $('#printSaleReceipt')
+      ?.addEventListener(
+        'click',
+        () => {
+          printAndroidReceipt(
+            order,
+            method,
+            null,
+            false
+          );
+        }
+      );
   }
 };
 
