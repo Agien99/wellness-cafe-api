@@ -32,7 +32,7 @@ class PublicController extends Controller
                 'tagline' => 'Relax . Reflect . Recharge',
                 'address' => 'Ground Floor, Block 7, FPM, UPSI',
                 'currency'=> 'RM',
-                'tax_rate'=> 0.06,
+                'tax_rate'=> 0.00,
             ],
             'categories' => Category::orderBy('sort_order')->get(),
             'products' => Product::query()

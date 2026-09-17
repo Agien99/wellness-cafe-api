@@ -18,7 +18,7 @@ const state = {
     address:  'Ground Floor, Block 7, FPM, UPSI',
     phone:    '+60 5-450 6000',
     currency: 'RM',
-    taxRate:  0.06,
+    taxRate:  0.00,
   },
   user: API.getUser(),
   role: API.getUser()?.role,
@@ -1997,11 +1997,6 @@ VIEWS.pos = async (root) => {
           <span>${money(0)}</span>
         </div>
 
-        <div class="sum-line">
-          <span>Tax (${(state.meta.taxRate*100).toFixed(0)}%)</span>
-          <span>${money(0)}</span>
-        </div>
-
         <div class="sum-line total">
           <span>Total</span>
           <span>${money(0)}</span>
@@ -2221,11 +2216,9 @@ VIEWS.pos = async (root) => {
         sub - totalDisc
       );
 
-    const tax =
-      taxBase * state.meta.taxRate;
+    const tax = 0;
 
-    const total =
-      taxBase + tax;
+    const total = taxBase;
 
     pos._calc = {
       sub,
@@ -2316,17 +2309,6 @@ VIEWS.pos = async (root) => {
           `
           : ''
       }
-
-      <div class="sum-line">
-        <span>
-          Tax
-          (${(state.meta.taxRate*100).toFixed(0)}%)
-        </span>
-
-        <span>
-          ${money(tax)}
-        </span>
-      </div>
 
       <div class="sum-line total">
         <span>Total</span>
@@ -3264,18 +3246,6 @@ VIEWS.pos = async (root) => {
             `
             : ''
         }
-
-        <div class="row">
-          <span>
-            Tax
-            (${(state.meta.taxRate*100).toFixed(0)}%)
-          </span>
-
-          <span>
-            ${state.meta.currency}
-            ${num(order.tax).toFixed(2)}
-          </span>
-        </div>
 
         <div class="row">
           <b>TOTAL</b>
