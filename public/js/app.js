@@ -370,7 +370,7 @@ async function reprintOrderReceipt(
      * recreate Received / Change values.
      */
     const sent =
-      printAndroidReceipt(
+      await printAndroidReceipt(
         order,
         method,
         null,
