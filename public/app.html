@@ -101,79 +101,211 @@
 (function () {
   const sidebar = document.getElementById('sidebar');
   const backdrop = document.getElementById('sidebarBackdrop');
-  const openBtn = document.getElementById('mobileMenuBtn');
+  const menuBtn = document.getElementById('mobileMenuBtn');
   const closeBtn = document.getElementById('sidebarClose');
   const navList = document.getElementById('navList');
 
-  function openSidebar() {
+  const DESKTOP_BREAKPOINT = 900;
+  const STORAGE_KEY = 'wellness_sidebar_collapsed';
+
+
+  /* ==========================================
+     DESKTOP / LAPTOP / LANDSCAPE TABLET
+     ========================================== */
+
+  function isDesktopMode() {
+    return window.innerWidth > DESKTOP_BREAKPOINT;
+  }
+
+  function setDesktopCollapsed(collapsed) {
+    document.body.classList.toggle(
+      'sidebar-collapsed',
+      collapsed
+    );
+
+    menuBtn.setAttribute(
+      'aria-expanded',
+      collapsed ? 'false' : 'true'
+    );
+
+    localStorage.setItem(
+      STORAGE_KEY,
+      collapsed ? '1' : '0'
+    );
+  }
+
+  function restoreDesktopSidebar() {
+    if (!isDesktopMode()) {
+      document.body.classList.remove(
+        'sidebar-collapsed'
+      );
+
+      return;
+    }
+
+    const collapsed =
+      localStorage.getItem(STORAGE_KEY) === '1';
+
+    document.body.classList.toggle(
+      'sidebar-collapsed',
+      collapsed
+    );
+
+    menuBtn.setAttribute(
+      'aria-expanded',
+      collapsed ? 'false' : 'true'
+    );
+  }
+
+
+  /* ==========================================
+     PHONE / SMALL TABLET
+     ========================================== */
+
+  function openMobileSidebar() {
     sidebar.classList.add('mobile-open');
     backdrop.classList.add('show');
-    document.body.classList.add('sidebar-open');
 
-    openBtn.setAttribute(
+    document.body.classList.add(
+      'sidebar-open'
+    );
+
+    menuBtn.setAttribute(
       'aria-expanded',
       'true'
     );
   }
 
-  function closeSidebar() {
+  function closeMobileSidebar() {
     sidebar.classList.remove('mobile-open');
     backdrop.classList.remove('show');
-    document.body.classList.remove('sidebar-open');
 
-    openBtn.setAttribute(
+    document.body.classList.remove(
+      'sidebar-open'
+    );
+
+    menuBtn.setAttribute(
       'aria-expanded',
       'false'
     );
   }
 
-  openBtn.addEventListener(
+
+  /* ==========================================
+     BURGER BUTTON
+     ========================================== */
+
+  menuBtn.addEventListener(
     'click',
-    openSidebar
+    function () {
+
+      if (isDesktopMode()) {
+
+        const collapsed =
+          document.body.classList.contains(
+            'sidebar-collapsed'
+          );
+
+        setDesktopCollapsed(!collapsed);
+
+        return;
+      }
+
+      if (
+        sidebar.classList.contains(
+          'mobile-open'
+        )
+      ) {
+        closeMobileSidebar();
+      } else {
+        openMobileSidebar();
+      }
+    }
   );
+
+
+  /* ==========================================
+     MOBILE CLOSE BUTTON
+     ========================================== */
 
   closeBtn.addEventListener(
     'click',
-    closeSidebar
+    closeMobileSidebar
   );
 
   backdrop.addEventListener(
     'click',
-    closeSidebar
+    closeMobileSidebar
   );
+
+
+  /* ==========================================
+     NAVIGATION
+     ========================================== */
 
   navList.addEventListener(
     'click',
     function (event) {
+
       if (
         event.target.closest('.nav-link') &&
-        window.innerWidth <= 900
+        !isDesktopMode()
       ) {
-        closeSidebar();
+        closeMobileSidebar();
       }
     }
   );
+
+
+  /* ==========================================
+     SCREEN RESIZE
+     ========================================== */
 
   window.addEventListener(
     'resize',
     function () {
-      if (window.innerWidth > 900) {
-        closeSidebar();
+
+      if (isDesktopMode()) {
+
+        closeMobileSidebar();
+        restoreDesktopSidebar();
+
+      } else {
+
+        document.body.classList.remove(
+          'sidebar-collapsed'
+        );
       }
     }
   );
 
+
+  /* ==========================================
+     ESCAPE KEY
+     ========================================== */
+
   document.addEventListener(
     'keydown',
     function (event) {
+
       if (
         event.key === 'Escape' &&
-        sidebar.classList.contains('mobile-open')
+        sidebar.classList.contains(
+          'mobile-open'
+        )
       ) {
-        closeSidebar();
+        closeMobileSidebar();
       }
     }
   );
+
+
+  /* ==========================================
+     INITIAL STATE
+     ========================================== */
+
+  restoreDesktopSidebar();
+
 })();
 </script>
 

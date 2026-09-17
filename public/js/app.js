@@ -11623,9 +11623,9 @@ async function openUserForm(id) {
     ((u.roles && u.roles.length) ? u.roles.map(r => r.id) : [u.role_id]).filter(Boolean)
   );
   const rolesChecklist = roles.map(r =>
-    `<label class="role-pick" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin:4px 0;cursor:pointer">
-      <input type="checkbox" class="uRoleChk" value="${r.id}" ${heldIds.has(r.id)?'checked':''}>
-      <span style="flex:1"><b>${r.name}</b><br><small class="text-muted">${(r.permissions||[]).includes('*')?'All access':(r.permissions||[]).join(', ')}</small></span>
+    `<label class="role-pick" style="display:grid;grid-template-columns:24px minmax(0,1fr);align-items:start;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin:4px 0;cursor:pointer">
+      <input type="checkbox" class="uRoleChk" value="${r.id}" ${heldIds.has(r.id)?'checked':''} style="width:16px;height:16px;margin:2px 0 0 0">
+      <span style="min-width:0"><b>${r.name}</b><br><small class="text-muted">${(r.permissions||[]).includes('*')?'All access':(r.permissions||[]).join(', ')}</small></span>
     </label>`
   ).join('');
   openModal(`
