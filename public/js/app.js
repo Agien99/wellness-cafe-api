@@ -755,7 +755,7 @@ VIEWS.dashboard = async (root) => {
 let pos = {
   cart: [],
   categoryId: null,
-  customerId: 8,
+  customerId: null,
   tableId: null,
   channel: 'pos',
 
@@ -772,12 +772,11 @@ VIEWS.pos = async (root) => {
   if (pos.categoryId === null) pos.categoryId = state.categories[0]?.id;
 
   const selectedCustomer =
-  state.customers.find(
-    c => c.id === pos.customerId
-  ) ||
-  state.customers.find(
-    c => c.id === 8
-  );
+    pos.customerId === null
+      ? null
+      : state.customers.find(
+          c => c.id === pos.customerId
+        ) || null;
 
   const activeLoyaltyTiers =
   state.loyaltyTiers
@@ -792,7 +791,7 @@ VIEWS.pos = async (root) => {
     num(selectedCustomer?.total_spent);
 
   const nextTier =
-    selectedCustomer?.id === 8
+    !selectedCustomer
       ? null
       : activeLoyaltyTiers.find(
           t =>
@@ -899,7 +898,7 @@ VIEWS.pos = async (root) => {
                 </div>
 
                 ${
-                  selectedCustomer?.id === 8
+                  !selectedCustomer
                     ? `
                       <div
                         style="
@@ -2409,7 +2408,7 @@ VIEWS.pos = async (root) => {
             ${
               state.customers.find(
                 c => c.id === pos.customerId
-              ).name
+              )?.name || 'Walk-in'
             }
           </b>
 
@@ -2839,9 +2838,11 @@ VIEWS.pos = async (root) => {
                 subtotal: r2(sub),
 
                 customer_id:
-                  pos.customerId === 8
-                    ? null
-                    : pos.customerId,
+                  state.customers.some(
+                    c => c.id === pos.customerId
+                  )
+                    ? pos.customerId
+                    : null,
 
                 channel:
                   pos.channel,
@@ -3049,7 +3050,7 @@ VIEWS.pos = async (root) => {
 
       clearAppliedPromo();
 
-      pos.customerId = 8;
+      pos.customerId = null;
       pos.tableId = null;
 
       state.customers =
@@ -3358,12 +3359,10 @@ function clearAppliedPromo() {
 
 function openPosCustomerPicker() {
   const customers =
-    [...state.customers].sort((a, b) => {
-      if (a.id === 8) return -1;
-      if (b.id === 8) return 1;
-
-      return a.name.localeCompare(b.name);
-    });
+    [...state.customers].sort(
+      (a, b) =>
+        a.name.localeCompare(b.name)
+    );
 
   openModal(`
     <div class="modal-head">
@@ -3446,7 +3445,49 @@ function openPosCustomerPicker() {
         );
       });
 
-    $('#posCustomerList').innerHTML =
+    const walkInMatches =
+      !q ||
+      'walk-in customer'.includes(q) ||
+      'walk in customer'.includes(q);
+
+    const walkInHtml =
+      walkInMatches
+        ? `
+          <button
+            type="button"
+            class="btn pos-customer-option"
+            data-customer-id=""
+            style="
+              width:100%;
+              justify-content:space-between;
+              text-align:left;
+              padding:12px 14px;
+            "
+          >
+            <span>
+              <b>Walk-in Customer</b>
+
+              <small
+                style="
+                  display:block;
+                  margin-top:3px;
+                  color:var(--text-soft);
+                "
+              >
+                Walk-in · No loyalty
+              </small>
+            </span>
+
+            ${
+              pos.customerId === null
+                ? '<span class="badge badge-success">Selected</span>'
+                : ''
+            }
+          </button>
+        `
+        : '';
+
+    const customerHtml =
       filtered.map(c => `
         <button
           type="button"
@@ -3469,11 +3510,9 @@ function openPosCustomerPicker() {
                 color:var(--text-soft);
               "
             >
-              ${
-                c.id === 8
-                  ? 'Walk-in · No loyalty'
-                  : `${c.membership} Member · ${c.points || 0} pts`
-              }
+              ${c.membership || 'Bronze'} Member
+              ·
+              ${c.points || 0} pts
             </small>
           </span>
 
@@ -3483,12 +3522,17 @@ function openPosCustomerPicker() {
               : ''
           }
         </button>
-      `).join('') ||
-      `
-        <div class="empty">
-          No customers found.
-        </div>
-      `;
+      `).join('');
+
+    $('#posCustomerList').innerHTML =
+      walkInHtml ||
+      customerHtml
+        ? walkInHtml + customerHtml
+        : `
+          <div class="empty">
+            No customers found.
+          </div>
+        `;
   };
 
   $('#posCustomerSearch')
@@ -3510,10 +3554,13 @@ function openPosCustomerPicker() {
           return;
         }
 
+        const customerId =
+          btn.dataset.customerId;
+
         pos.customerId =
-          Number(
-            btn.dataset.customerId
-          );
+          customerId === ''
+            ? null
+            : Number(customerId);
 
         clearAppliedPromo();
 
