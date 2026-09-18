@@ -61,17 +61,12 @@ class OrderService
             ]);
         }
 
-        $customer = Customer::find(
-            $payload['customer_id'] ?? 8
-        ) ?? Customer::find(8);
+        $customerId =
+            $payload['customer_id'] ?? null;
 
-        if (!$customer) {
-            throw ValidationException::withMessages([
-                'customer' => [
-                    'Walk-in customer record is missing.',
-                ],
-            ]);
-        }
+        $customer = $customerId
+            ? Customer::find($customerId)
+            : null;
 
         $channel = $payload['channel'] ?? 'pos';
         $cashier = $payload['cashier'] ?? null;
@@ -258,10 +253,13 @@ class OrderService
         * Membership discount is resolved dynamically
         * from the customer's active loyalty tier.
         */
-        $memberDiscount = round(
-            $subtotal * $customer->membership_discount,
-            2
-        );
+        $memberDiscount = $customer
+            ? round(
+                $subtotal *
+                $customer->membership_discount,
+                2
+            )
+            : 0.00;
 
         $order = DB::transaction(function () use (
             $payload,
@@ -370,8 +368,8 @@ class OrderService
             $order = Order::create([
                 'order_no' => Order::nextOrderNo(),
 
-                'customer_id' => $customer->id,
-                'customer_name' => $customer->name,
+                'customer_id' => $customer?->id,
+                'customer_name' => $customer?->name ?? 'Walk-in Customer',
 
                 'channel' => $channel,
 
@@ -498,10 +496,7 @@ class OrderService
             * Award loyalty points and recalculate
             * the customer's tier after payment.
             */
-            if (
-                $customer->id !== 8 &&
-                $payment
-            ) {
+            if ($customer && $payment) {
                 $earned = $this->awardLoyalty(
                     $customer,
                     $total,
@@ -717,10 +712,7 @@ class OrderService
             /*
              * Loyalty awarded after successful payment.
              */
-            if (
-                $lockedOrder->customer_id &&
-                $lockedOrder->customer_id !== 8
-            ) {
+            if ($lockedOrder->customer_id) {
                 $customer =
                     $lockedOrder->customer;
 
@@ -830,11 +822,7 @@ class OrderService
     private function promotionCustomerId(
         ?Customer $customer
     ): ?int {
-        if (!$customer || $customer->id === 8) {
-            return null;
-        }
-
-        return $customer->id;
+        return $customer?->id;
     }
 
     /**
@@ -1029,10 +1017,7 @@ class OrderService
              */
             $customer = $order->customer;
 
-            if (
-                $customer &&
-                $customer->id !== 8
-            ) {
+            if ($lockedOrder->customer_id) {
                 $reverse =
                     (int) $order->loyalty_points_earned;
 
